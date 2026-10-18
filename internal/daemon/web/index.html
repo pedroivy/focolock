@@ -1,0 +1,509 @@
+<!doctype html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Focolock</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%23e8483c'/%3E%3Cpath d='M34 46V36a16 16 0 0 1 32 0v10' stroke='white' stroke-width='8' fill='none'/%3E%3Crect x='26' y='44' width='48' height='36' rx='6' fill='white'/%3E%3C/svg%3E">
+<style>
+:root {
+  --bg: #f5f5f7;
+  --card: #ffffff;
+  --text: #1d1d1f;
+  --muted: #6e6e73;
+  --line: #e3e3e8;
+  --field: #f2f2f5;
+  --accent: #e8483c;
+  --accent-text: #ffffff;
+  --accent-soft: #fdeceb;
+  --ok: #1f9d55;
+  --shadow: 0 1px 2px rgba(0,0,0,.04), 0 8px 24px rgba(0,0,0,.06);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161618;
+    --card: #222225;
+    --text: #f5f5f7;
+    --muted: #9a9aa0;
+    --line: #34343a;
+    --field: #2c2c31;
+    --accent: #ff5a4e;
+    --accent-text: #ffffff;
+    --accent-soft: #3a2220;
+    --ok: #34c77b;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.25);
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text); }
+body {
+  font: 15px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  padding: 28px 16px 48px;
+}
+main { max-width: 620px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }
+header { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; }
+header svg { width: 38px; height: 38px; flex: none; }
+header h1 { font-size: 22px; margin: 0; letter-spacing: -.01em; }
+.pill {
+  margin-left: auto; font-size: 13px; padding: 5px 11px; border-radius: 999px;
+  background: var(--field); color: var(--muted); white-space: nowrap;
+}
+.pill.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.card { background: var(--card); border-radius: 16px; padding: 20px; box-shadow: var(--shadow); }
+.card h2 { font-size: 15px; margin: 0 0 14px; font-weight: 650; }
+.row { display: flex; gap: 8px; }
+input[type=text], input[type=time], input[type=number], select {
+  font: inherit; color: var(--text); background: var(--field);
+  border: 1px solid transparent; border-radius: 10px; padding: 10px 12px; min-width: 0;
+}
+input[type=text] { flex: 1; }
+input:focus, select:focus { outline: none; border-color: var(--accent); }
+button {
+  font: inherit; cursor: pointer; border: 0; border-radius: 10px; padding: 10px 14px;
+  background: var(--field); color: var(--text);
+}
+button:hover { filter: brightness(.96); }
+button.primary { background: var(--accent); color: var(--accent-text); font-weight: 600; }
+button.big { width: 100%; padding: 13px; font-size: 16px; margin-top: 16px; }
+button:disabled { opacity: .45; cursor: default; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; min-height: 0; }
+.chip {
+  display: inline-flex; align-items: center; gap: 6px; background: var(--accent-soft);
+  color: var(--accent); border-radius: 999px; padding: 4px 6px 4px 11px; font-size: 14px; font-weight: 550;
+}
+.chip button { background: none; color: inherit; padding: 0 5px; font-size: 16px; line-height: 1; }
+.recent { margin-top: 10px; font-size: 13px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.recent button { font-size: 13px; padding: 3px 10px; border-radius: 999px; }
+.label { font-size: 13px; color: var(--muted); margin: 18px 0 8px; }
+.seg { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.seg button.sel { background: var(--text); color: var(--card); font-weight: 600; }
+.until { display: flex; align-items: center; gap: 8px; margin-top: 8px; color: var(--muted); font-size: 14px; flex-wrap: wrap; }
+.until input[type=number] { width: 72px; }
+.until.sel { color: var(--text); }
+.list { display: grid; gap: 10px; }
+.item { display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: var(--field); border-radius: 12px; }
+.item .what { flex: 1; min-width: 0; }
+.item .sites { font-weight: 600; overflow-wrap: anywhere; }
+.item .meta { font-size: 13px; color: var(--muted); }
+.timer { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--accent); font-size: 17px; white-space: nowrap; }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--line); flex: none; }
+.dot.on { background: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+.empty { color: var(--muted); font-size: 14px; }
+.days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
+.days button { padding: 9px 0; font-size: 13px; }
+.days button.sel { background: var(--text); color: var(--card); font-weight: 600; }
+.hours { display: flex; align-items: center; gap: 8px; color: var(--muted); flex-wrap: wrap; }
+details summary { cursor: pointer; color: var(--accent); font-weight: 600; font-size: 14px; list-style: none; margin-top: 14px; }
+details summary::-webkit-details-marker { display: none; }
+.small { font-size: 13px; color: var(--muted); margin-top: 10px; }
+dialog {
+  border: 0; border-radius: 16px; padding: 22px; max-width: 400px; width: calc(100% - 32px);
+  background: var(--card); color: var(--text); box-shadow: 0 20px 60px rgba(0,0,0,.35);
+}
+dialog::backdrop { background: rgba(0,0,0,.35); }
+dialog h3 { margin: 0 0 8px; font-size: 17px; }
+dialog p { margin: 0 0 6px; color: var(--muted); }
+dialog .row { justify-content: flex-end; margin-top: 18px; }
+#toast {
+  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(120px);
+  background: var(--text); color: var(--card); padding: 11px 16px; border-radius: 12px;
+  transition: transform .25s; max-width: calc(100% - 32px); font-size: 14px;
+}
+#toast.show { transform: translateX(-50%) translateY(0); }
+#toast.err { background: var(--accent); color: #fff; }
+@media (max-width: 480px) {
+  .seg { grid-template-columns: repeat(2, 1fr); }
+  .item { flex-wrap: wrap; }
+}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <svg viewBox="0 0 100 100" aria-hidden="true"><rect width="100" height="100" rx="22" fill="var(--accent)"/><path d="M34 46V36a16 16 0 0 1 32 0v10" stroke="#fff" stroke-width="8" fill="none"/><rect x="26" y="44" width="48" height="36" rx="6" fill="#fff"/></svg>
+    <h1>Focolock</h1>
+    <span class="pill" id="pill">A ligar…</span>
+  </header>
+
+  <section class="card">
+    <h2>Bloquear um site</h2>
+    <form class="row" id="addForm">
+      <input type="text" id="siteInput" placeholder="Cola aqui o link — ex.: youtube.com" autocomplete="off" autofocus>
+      <button type="submit">Adicionar</button>
+    </form>
+    <div class="chips" id="chips"></div>
+    <div class="recent" id="recent"></div>
+
+    <div class="label">Durante quanto tempo?</div>
+    <div class="seg" id="durations">
+      <button type="button" data-min="25">25 min</button>
+      <button type="button" data-min="60" class="sel">1 hora</button>
+      <button type="button" data-min="120">2 horas</button>
+      <button type="button" data-min="240">4 horas</button>
+    </div>
+    <div class="until" id="untilRow">
+      <span>ou até às</span> <input type="time" id="untilInput">
+      <span>ou</span> <input type="number" id="customNum" min="1" placeholder="—">
+      <select id="customUnit"><option value="1">minutos</option><option value="60">horas</option><option value="1440">dias</option></select>
+    </div>
+
+    <button class="primary big" id="lockBtn" disabled>Bloquear</button>
+  </section>
+
+  <section class="card">
+    <h2>Bloqueado agora</h2>
+    <div class="list" id="locks"></div>
+  </section>
+
+  <section class="card">
+    <h2>Horários fixos</h2>
+    <div class="list" id="schedules"></div>
+    <details id="schedDetails">
+      <summary>+ Novo horário</summary>
+      <div class="label">Sites</div>
+      <form class="row" id="schedAddForm">
+        <input type="text" id="schedSiteInput" placeholder="Cola aqui o link" autocomplete="off">
+        <button type="submit">Adicionar</button>
+      </form>
+      <div class="chips" id="schedChips"></div>
+      <div class="label">Dias</div>
+      <div class="days" id="days"></div>
+      <div class="label">Horas</div>
+      <div class="hours">
+        das <input type="time" id="schedFrom" value="09:00"> às <input type="time" id="schedTo" value="18:00">
+      </div>
+      <div class="label">Nome (opcional)</div>
+      <div class="row"><input type="text" id="schedName" placeholder="ex.: trabalho"></div>
+      <button class="primary big" id="schedBtn" disabled>Criar horário</button>
+      <div class="small">Remover um horário só tem efeito 24 horas depois, e nunca a meio do período de bloqueio.</div>
+    </details>
+  </section>
+</main>
+
+<dialog id="confirm">
+  <h3 id="confirmTitle"></h3>
+  <p id="confirmBody"></p>
+  <p><strong>Não é possível cancelar depois.</strong></p>
+  <div class="row">
+    <button type="button" id="confirmNo">Voltar</button>
+    <button type="button" class="primary" id="confirmYes">Bloquear</button>
+  </div>
+</dialog>
+<div id="toast"></div>
+
+<script>
+const TOKEN = "__FOCOLOCK_TOKEN__";
+const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
+const DAY_NAMES = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+const $ = (id) => document.getElementById(id);
+
+let state = null;
+let clockOffset = 0; // hora confiável do serviço - hora do navegador
+const sites = [];
+const schedSites = [];
+let durationMin = 60;
+let mode = "for"; // for | until | custom
+const schedDays = new Set([1, 2, 3, 4, 5]);
+
+function nowTrusted() { return Date.now() + clockOffset; }
+
+async function call(req) {
+  const r = await fetch("/api", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Focolock-Token": TOKEN },
+    body: JSON.stringify({ tz: TZ, ...req }),
+  });
+  if (!r.ok) throw new Error(await r.text());
+  const resp = await r.json();
+  if (resp.now) clockOffset = new Date(resp.now).getTime() - Date.now();
+  if (resp.state) { state = resp; render(); }
+  if (!resp.ok) throw new Error(resp.error || "Erro desconhecido");
+  return resp;
+}
+
+function toast(msg, err) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.className = "show" + (err ? " err" : "");
+  clearTimeout(toast.t);
+  toast.t = setTimeout(() => (t.className = err ? "err" : ""), 3500);
+}
+
+// Aceita "https://www.youtube.com/watch?v=x", "youtube.com", "*.x.com".
+function normalize(raw) {
+  let s = raw.trim().toLowerCase();
+  if (!s) return null;
+  if (!s.includes("://")) s = "http://" + s;
+  try {
+    let h = new URL(s).hostname.replace(/^\*\./, "").replace(/^www\./, "").replace(/\.$/, "");
+    return /^([a-z0-9-]+\.)+[a-z]{2,}$/.test(h) ? h : null;
+  } catch { return null; }
+}
+
+function addSites(list, raw) {
+  let added = 0;
+  for (const part of raw.split(/[\s,]+/)) {
+    if (!part) continue;
+    const h = normalize(part);
+    if (!h) { toast(`"${part}" não parece um site`, true); continue; }
+    if (!list.includes(h)) { list.push(h); added++; }
+  }
+  return added;
+}
+
+function renderChips(el, list, onChange) {
+  el.replaceChildren(...list.map((s) => {
+    const c = document.createElement("span");
+    c.className = "chip";
+    c.textContent = s;
+    const x = document.createElement("button");
+    x.type = "button"; x.textContent = "×"; x.title = "Tirar";
+    x.onclick = () => { list.splice(list.indexOf(s), 1); onChange(); };
+    c.append(x);
+    return c;
+  }));
+}
+
+// Sites usados recentemente ficam guardados neste navegador para um clique.
+function loadRecent() {
+  try { return JSON.parse(localStorage.getItem("focolock.recent") || "[]"); } catch { return []; }
+}
+function saveRecent(list) {
+  const merged = [...new Set([...list, ...loadRecent()])].slice(0, 12);
+  try { localStorage.setItem("focolock.recent", JSON.stringify(merged)); } catch {}
+}
+function renderRecent() {
+  const el = $("recent");
+  const rec = loadRecent().filter((s) => !sites.includes(s));
+  if (!rec.length) { el.replaceChildren(); return; }
+  const lbl = document.createElement("span");
+  lbl.textContent = "Recentes:";
+  el.replaceChildren(lbl, ...rec.map((s) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.textContent = "+ " + s;
+    b.onclick = () => { sites.push(s); refreshLockForm(); };
+    return b;
+  }));
+}
+
+function refreshLockForm() {
+  renderChips($("chips"), sites, refreshLockForm);
+  renderRecent();
+  $("lockBtn").disabled = sites.length === 0 || !lockEnd();
+  $("lockBtn").textContent = sites.length ? `Bloquear ${sites.length === 1 ? sites[0] : sites.length + " sites"}` : "Bloquear";
+}
+
+function lockEnd() {
+  const now = nowTrusted();
+  if (mode === "for") return new Date(now + durationMin * 60000);
+  if (mode === "custom") {
+    const n = Number($("customNum").value);
+    if (!(n > 0)) return null;
+    return new Date(now + n * Number($("customUnit").value) * 60000);
+  }
+  const v = $("untilInput").value;
+  if (!v) return null;
+  const [h, m] = v.split(":").map(Number);
+  const d = new Date(now);
+  d.setHours(h, m, 0, 0);
+  if (d.getTime() <= now) d.setDate(d.getDate() + 1);
+  return d;
+}
+
+function fmtEnd(d) {
+  const today = new Date(nowTrusted()).toDateString() === d.toDateString();
+  const t = d.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" });
+  return today ? `hoje às ${t}` : d.toLocaleDateString("pt-PT", { weekday: "long", day: "numeric", month: "short" }) + ` às ${t}`;
+}
+
+function fmtLeft(ms) {
+  if (ms <= 0) return "0:00";
+  const s = Math.floor(ms / 1000), d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600),
+        m = Math.floor(s % 3600 / 60), sec = s % 60;
+  const p = (n) => String(n).padStart(2, "0");
+  if (d) return `${d}d ${h}h ${p(m)}m`;
+  return h ? `${h}:${p(m)}:${p(sec)}` : `${m}:${p(sec)}`;
+}
+
+const hhmm = (min) => `${String(Math.floor(min / 60)).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
+
+function render() {
+  if (!state) return;
+  const st = state.state || {};
+  const active = state.active || [];
+  const pill = $("pill");
+  pill.textContent = active.length ? `${active.length} ${active.length === 1 ? "site bloqueado" : "sites bloqueados"}` : "Nada bloqueado";
+  pill.className = "pill" + (active.length ? " on" : "");
+
+  const locks = (st.locks || []).filter((l) => new Date(l.end).getTime() > nowTrusted());
+  $("locks").replaceChildren(...(locks.length ? locks.map((l) => {
+    const it = document.createElement("div");
+    it.className = "item";
+    it.innerHTML = `<div class="what"><div class="sites"></div><div class="meta"></div></div><div class="timer"></div>`;
+    it.querySelector(".sites").textContent = l.sites.join(", ");
+    it.querySelector(".meta").textContent = "até " + fmtEnd(new Date(l.end));
+    it.querySelector(".timer").dataset.end = l.end;
+    return it;
+  }) : [Object.assign(document.createElement("div"), { className: "empty", textContent: "Nenhum bloqueio a decorrer." })]));
+
+  const scheds = st.schedules || [];
+  $("schedules").replaceChildren(...(scheds.length ? scheds.map((s) => {
+    const it = document.createElement("div");
+    it.className = "item";
+    const on = active.length && s.sites.some((x) => active.includes(x)) && isScheduleActive(s);
+    it.innerHTML = `<span class="dot${on ? " on" : ""}"></span><div class="what"><div class="sites"></div><div class="meta"></div></div>`;
+    it.querySelector(".sites").textContent = (s.name ? s.name + " · " : "") + s.sites.join(", ");
+    const days = (s.days || []).map((d) => DAY_NAMES[d]).join(", ");
+    let meta = `${days} · ${hhmm(s.from)}–${hhmm(s.to)}`;
+    if (s.remove_after) meta += ` · sai ${fmtEnd(new Date(s.remove_after))}`;
+    it.querySelector(".meta").textContent = meta;
+    if (!s.remove_after) {
+      const b = document.createElement("button");
+      b.textContent = "Remover";
+      b.onclick = () => removeSchedule(s);
+      it.append(b);
+    }
+    return it;
+  }) : [Object.assign(document.createElement("div"), { className: "empty", textContent: "Sem horários. Cria um para bloquear sempre à mesma hora." })]));
+  tick();
+}
+
+function isScheduleActive(s) {
+  const d = new Date(nowTrusted());
+  const m = d.getHours() * 60 + d.getMinutes(), today = d.getDay(), yest = (today + 6) % 7;
+  const has = (x) => s.days.includes(x);
+  if (s.from === s.to) return has(today);
+  if (s.from < s.to) return has(today) && m >= s.from && m < s.to;
+  return (has(today) && m >= s.from) || (has(yest) && m < s.to);
+}
+
+function tick() {
+  for (const el of document.querySelectorAll(".timer[data-end]")) {
+    el.textContent = fmtLeft(new Date(el.dataset.end).getTime() - nowTrusted());
+  }
+}
+
+function confirmDialog(title, body, yesLabel) {
+  return new Promise((resolve) => {
+    $("confirmTitle").textContent = title;
+    $("confirmBody").textContent = body;
+    $("confirmYes").textContent = yesLabel;
+    const dlg = $("confirm");
+    const done = (v) => { dlg.close(); resolve(v); };
+    $("confirmYes").onclick = () => done(true);
+    $("confirmNo").onclick = () => done(false);
+    dlg.oncancel = () => resolve(false);
+    dlg.showModal();
+  });
+}
+
+async function doLock() {
+  const end = lockEnd();
+  if (!sites.length || !end) return;
+  const ok = await confirmDialog(
+    `Bloquear ${sites.join(", ")}?`,
+    `Fica bloqueado até ${fmtEnd(end)}.`,
+    "Bloquear"
+  );
+  if (!ok) return;
+  const req = { cmd: "lock", sites: [...sites] };
+  if (mode === "until") req.until = $("untilInput").value;
+  else req.for = Math.round((end.getTime() - nowTrusted()) / 60000) * 60e9;
+  try {
+    const r = await call(req);
+    saveRecent(sites);
+    sites.length = 0;
+    refreshLockForm();
+    toast(r.message || "Bloqueado.");
+  } catch (e) { toast(e.message, true); }
+}
+
+async function removeSchedule(s) {
+  const ok = await confirmDialog(
+    "Remover este horário?",
+    "Continua a valer durante mais 24 horas (e até ao fim do período de bloqueio, se estiver a decorrer).",
+    "Pedir remoção"
+  );
+  if (!ok) return;
+  try { const r = await call({ cmd: "schedule_remove", id: s.id }); toast(r.message); }
+  catch (e) { toast(e.message, true); }
+}
+
+async function doSchedule() {
+  const days = [...schedDays].sort();
+  const from = $("schedFrom").value, to = $("schedTo").value;
+  const ok = await confirmDialog(
+    `Bloquear ${schedSites.join(", ")}?`,
+    `${days.map((d) => DAY_NAMES[d]).join(", ")}, das ${from} às ${to}. Para remover, demora 24 horas.`,
+    "Criar horário"
+  );
+  if (!ok) return;
+  try {
+    await call({ cmd: "schedule_add", sites: [...schedSites], days, from, to, name: $("schedName").value.trim() });
+    saveRecent(schedSites);
+    schedSites.length = 0;
+    $("schedName").value = "";
+    refreshSchedForm();
+    $("schedDetails").open = false;
+    toast("Horário criado.");
+  } catch (e) { toast(e.message, true); }
+}
+
+function refreshSchedForm() {
+  renderChips($("schedChips"), schedSites, refreshSchedForm);
+  $("schedBtn").disabled = !schedSites.length || !schedDays.size || !$("schedFrom").value || !$("schedTo").value;
+}
+
+// --- ligações ---
+$("addForm").onsubmit = (e) => {
+  e.preventDefault();
+  addSites(sites, $("siteInput").value);
+  $("siteInput").value = "";
+  refreshLockForm();
+};
+$("siteInput").addEventListener("paste", () => setTimeout(() => {
+  if (addSites(sites, $("siteInput").value)) { $("siteInput").value = ""; refreshLockForm(); }
+}, 0));
+
+function setMode(m) {
+  mode = m;
+  for (const b of $("durations").children) b.classList.toggle("sel", m === "for" && Number(b.dataset.min) === durationMin);
+  $("untilRow").classList.toggle("sel", m !== "for");
+  refreshLockForm();
+}
+for (const b of $("durations").children) {
+  b.onclick = () => { durationMin = Number(b.dataset.min); $("untilInput").value = ""; $("customNum").value = ""; setMode("for"); };
+}
+$("untilInput").oninput = () => { $("customNum").value = ""; setMode($("untilInput").value ? "until" : "for"); };
+$("customNum").oninput = $("customUnit").onchange = () => { $("untilInput").value = ""; setMode($("customNum").value ? "custom" : "for"); };
+$("lockBtn").onclick = doLock;
+
+$("schedAddForm").onsubmit = (e) => {
+  e.preventDefault();
+  addSites(schedSites, $("schedSiteInput").value);
+  $("schedSiteInput").value = "";
+  refreshSchedForm();
+};
+for (const d of [1, 2, 3, 4, 5, 6, 0]) {
+  const b = document.createElement("button");
+  b.type = "button"; b.textContent = DAY_NAMES[d];
+  b.classList.toggle("sel", schedDays.has(d));
+  b.onclick = () => { schedDays.has(d) ? schedDays.delete(d) : schedDays.add(d); b.classList.toggle("sel"); refreshSchedForm(); };
+  $("days").append(b);
+}
+$("schedFrom").oninput = $("schedTo").oninput = refreshSchedForm;
+$("schedBtn").onclick = doSchedule;
+
+async function poll() {
+  try { await call({ cmd: "status" }); }
+  catch (e) { $("pill").textContent = "Sem ligação ao serviço"; $("pill").className = "pill"; }
+}
+setInterval(tick, 1000);
+setInterval(poll, 5000);
+poll();
+refreshLockForm();
+refreshSchedForm();
+</script>
+</body>
+</html>

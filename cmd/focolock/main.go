@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -24,6 +25,7 @@ Uso:
   focolock bloquear --ate 18:00 instagram.com       bloqueia agora, até um horário
   focolock agendar --dias seg-sex --das 09:00 --ate 18:00 [--nome trabalho] youtube.com
   focolock status                                   mostra o que está bloqueado
+  focolock abrir                                    abre a janela do app
   focolock remover <id>                             remove um agendamento (após 24h)
 
   sudo focolock instalar                            instala/atualiza o serviço
@@ -47,6 +49,8 @@ func main() {
 		err = cmdSchedule(args)
 	case "status", "st":
 		err = cmdStatus()
+	case "abrir", "open", "app":
+		err = exec.Command("/usr/bin/open", "/Applications/Focolock.app").Run()
 	case "remover", "rm":
 		err = cmdRemove(args)
 	case "instalar", "install":

@@ -4,6 +4,13 @@ Bloqueador de sites para macOS no estilo **Cold Turkey**: você define um
 horário (ou uma duração) e os sites ficam bloqueados — mesmo que você feche o
 terminal, mate o processo, reinicie o Mac ou mude a hora do relógio.
 
+**App:** depois de instalar, abra o **Focolock** pelo Launchpad ou Spotlight.
+Cola o link, escolhe a duração e carrega em Bloquear. Fechar a janela não
+desbloqueia nada: ela é só uma interface para o serviço que corre em segundo
+plano (servida em `http://127.0.0.1:47811`, só acessível a partir do próprio Mac).
+
+Também pelo Terminal:
+
 ```sh
 focolock bloquear --por 2h youtube.com x.com
 focolock bloquear --ate 18:00 instagram.com
@@ -17,7 +24,13 @@ Não existe comando para cancelar ou encurtar um bloqueio. Esse é o ponto.
 
 ## Instalação
 
-Precisa do Go 1.22+ (`brew install go`).
+Sem compilar nada (Intel e Apple Silicon):
+
+```sh
+cd ~ && curl -L https://raw.githubusercontent.com/pedroivy/focolock/claude/affectionate-volta-g0crb5/bin/focolock -o focolock && chmod +x focolock && sudo ./focolock instalar
+```
+
+Ou a partir do código, com Go 1.22+ (`brew install go`):
 
 ```sh
 git clone <este repo> && cd focolock
@@ -98,6 +111,5 @@ internal/api        protocolo CLI <-> daemon
 
 ## Próximos passos
 
-- App de barra de menu (SwiftUI) falando com o mesmo socket
 - Bloqueio de apps (matar processos por nome durante o bloqueio)
 - Extensão de navegador para bloquear por caminho (ex.: só `youtube.com/shorts`)

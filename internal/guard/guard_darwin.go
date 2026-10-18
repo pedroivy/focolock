@@ -9,9 +9,12 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/pedroivy/focolock/internal/state"
 )
+
+var timeNow = time.Now
 
 func launchctl(args ...string) (string, error) {
 	out, err := exec.Command("/bin/launchctl", args...).CombinedOutput()
@@ -115,6 +118,9 @@ func Install() error {
 	if err := os.Symlink(BinPath, LinkPath); err != nil {
 		return err
 	}
+	if err := installApp(); err != nil {
+		return fmt.Errorf("criar %s: %w", AppPath, err)
+	}
 	Ensure()
 	// Se um serviço sobreviveu ao bootout (o outro o religou), reinicia com o binário novo.
 	for label := range Services {
@@ -135,6 +141,7 @@ func Uninstall() error {
 	for _, p := range []string{LinkPath, BinPath} {
 		_ = os.Remove(p)
 	}
+	_ = os.RemoveAll(AppPath)
 	_ = os.RemoveAll(BackupDir)
 	_ = os.RemoveAll(DataDir)
 	return nil

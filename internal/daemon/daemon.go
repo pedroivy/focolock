@@ -60,6 +60,7 @@ func Run() error {
 		return err
 	}
 	go d.serve(ln)
+	go d.serveWeb()
 
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
