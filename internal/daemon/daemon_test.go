@@ -110,3 +110,59 @@ func TestInternetLock(t *testing.T) {
 		t.Fatalf("hosts:\n%s", data)
 	}
 }
+
+func TestTimerAddUseRemove(t *testing.T) {
+	d, hosts := newTestDaemon(t)
+	now := d.clock.Now().In(time.UTC)
+	m := now.Hour()*60 + now.Minute()
+	// Um período que contém agora e outro (impossível de conter agora) para validar índices.
+	from, to := state.FormatHHMM(m), "24:00"
+	resp := d.Handle(api.Request{Cmd: api.CmdTimerAdd, Sites: []string{"x.com"}, TZ: "UTC",
+		Periods: []api.Period{{From: from, To: to, Minutes: 1}}})
+	if !resp.OK {
+		t.Fatal(resp.Error)
+	}
+	if len(resp.Active) != 1 || resp.Active[0] != "x.com" || !resp.Guarded {
+		t.Fatalf("resp = %+v", resp)
+	}
+	id := resp.State.Timers[0].ID
+	d.tick()
+	if data, _ := os.ReadFile(hosts); !strings.Contains(string(data), "0.0.0.0 x.com") {
+		t.Fatalf("hosts:\n%s", data)
+	}
+
+	resp = d.Handle(api.Request{Cmd: api.CmdTimerUse, ID: id, Period: 0, TZ: "UTC"})
+	if !resp.OK || len(resp.Active) != 0 {
+		t.Fatalf("resp = %+v", resp)
+	}
+	d.tick()
+	if data, _ := os.ReadFile(hosts); strings.Contains(string(data), "0.0.0.0 x.com") {
+		t.Fatalf("deveria estar desbloqueado:\n%s", data)
+	}
+	if resp = d.Handle(api.Request{Cmd: api.CmdTimerUse, ID: id, Period: 0}); resp.OK {
+		t.Fatal("não pode usar duas vezes")
+	}
+	if got := d.store.Load(); len(got.Timers) != 1 || len(got.Timers[0].Uses) != 1 {
+		t.Fatal("pausa não foi salva")
+	}
+
+	resp = d.Handle(api.Request{Cmd: api.CmdTimerRemove, ID: id})
+	if !resp.OK || resp.State.Timers[0].RemoveAfter == nil || !resp.Guarded {
+		t.Fatalf("resp = %+v", resp)
+	}
+}
+
+func TestTimerValidation(t *testing.T) {
+	d, _ := newTestDaemon(t)
+	for _, req := range []api.Request{
+		{Cmd: api.CmdTimerAdd, Sites: []string{"x.com"}},
+		{Cmd: api.CmdTimerAdd, Sites: []string{"x.com"}, Periods: []api.Period{{From: "12:00", To: "06:00", Minutes: 10}}},
+		{Cmd: api.CmdTimerAdd, Sites: []string{"x.com"}, Periods: []api.Period{{From: "06:00", To: "12:00"}}},
+		{Cmd: api.CmdTimerAdd, Periods: []api.Period{{From: "06:00", To: "12:00", Minutes: 10}}},
+		{Cmd: api.CmdTimerUse, ID: "nada"},
+	} {
+		if resp := d.Handle(req); resp.OK {
+			t.Errorf("deveria falhar: %+v", req)
+		}
+	}
+}

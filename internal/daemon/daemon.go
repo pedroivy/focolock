@@ -184,14 +184,14 @@ func (d *Daemon) Handle(req api.Request) *api.Response {
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	snapshot := *d.st
+	snapshot := d.st.Clone()
 	return &api.Response{
 		OK:      true,
 		Message: msg,
 		Now:     now,
 		Active:  d.st.ActiveSites(now),
 		Guarded: d.st.Guarded(now),
-		State:   &snapshot,
+		State:   snapshot,
 	}
 }
 
@@ -240,7 +240,32 @@ func (d *Daemon) apply(req api.Request, now time.Time) (string, error) {
 		log.Printf("novo agendamento %s %q", sc.ID, sc.Name)
 		return fmt.Sprintf("Agendamento %s criado.", sc.ID), nil
 
-	case api.CmdScheduleRemove:
+	case api.CmdTimerAdd:
+		list, err := sites.NormalizeAll(req.Sites)
+		if err != nil {
+			return "", err
+		}
+		periods, err := timerPeriods(req.Periods)
+		if err != nil {
+			return "", err
+		}
+		t := state.Timer{
+			ID: state.NewID(), Name: req.Name, Sites: list, Periods: periods,
+			TZ: loc(req.TZ).String(), Created: now,
+		}
+		d.st.Timers = append(d.st.Timers, t)
+		log.Printf("novo temporizador %s %q", t.ID, t.Name)
+		return fmt.Sprintf("Temporizador %s criado. Os sites ficam bloqueados fora das pausas.", t.ID), nil
+
+	case api.CmdTimerUse:
+		u, err := d.st.UseTimer(req.ID, req.Period, now)
+		if err != nil {
+			return "", err
+		}
+		log.Printf("temporizador %s: pausa do período %d até %s", req.ID, req.Period, u.End.Format(time.RFC3339))
+		return fmt.Sprintf("Desbloqueado até %s.", u.End.In(loc(req.TZ)).Format("15:04")), nil
+
+	case api.CmdScheduleRemove, api.CmdTimerRemove:
 		at, err := d.st.RequestRemoval(req.ID, now)
 		if err != nil {
 			return "", err
@@ -256,6 +281,28 @@ func loc(tz string) *time.Location {
 		return l
 	}
 	return time.Local
+}
+
+// timerPeriods converte os períodos "HH:MM" e valida-os. "24:00" é o fim do dia.
+func timerPeriods(in []api.Period) ([]state.TimerPeriod, error) {
+	out := make([]state.TimerPeriod, 0, len(in))
+	for _, p := range in {
+		from, err := state.ParseHHMM(p.From)
+		if err != nil {
+			return nil, err
+		}
+		to := 24 * 60
+		if p.To != "24:00" {
+			if to, err = state.ParseHHMM(p.To); err != nil {
+				return nil, err
+			}
+		}
+		out = append(out, state.TimerPeriod{From: from, To: to, Minutes: p.Minutes})
+	}
+	if err := state.ValidatePeriods(out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func lockEnd(req api.Request, now time.Time) (time.Time, error) {

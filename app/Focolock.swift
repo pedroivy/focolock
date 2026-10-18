@@ -42,6 +42,7 @@ struct Resp: Decodable {
 struct StateDTO: Decodable {
     let locks: [LockDTO]?
     let schedules: [SchedDTO]?
+    let timers: [TimerDTO]?
 }
 
 struct LockDTO: Decodable, Identifiable {
@@ -65,6 +66,36 @@ struct SchedDTO: Decodable, Identifiable {
         case id, name, sites, days, from, to, tz
         case removeAfter = "remove_after"
     }
+}
+
+struct TimerDTO: Decodable, Identifiable {
+    let id: String
+    let name: String
+    let sites: [String]
+    let periods: [PeriodDTO]
+    let tz: String
+    let uses: [UseDTO]?
+    let removeAfter: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, sites, periods, tz, uses
+        case removeAfter = "remove_after"
+    }
+}
+
+struct PeriodDTO: Decodable {
+    let from: Int
+    let to: Int
+    let minutes: Int
+}
+
+struct UseDTO: Decodable {
+    let period: Int
+    let day: String
+    let start: String
+    let end: String
+    var startDate: Date { parseDate(start) ?? .distantFuture }
+    var endDate: Date { parseDate(end) ?? .distantPast }
 }
 
 /// O Go envia até 9 casas decimais nos segundos; o ISO8601DateFormatter não
@@ -187,6 +218,36 @@ final class Model: ObservableObject {
         }
     }
 
+    func addTimer(sites: [String], periods: [[String: Any]], name: String) async -> Bool {
+        do {
+            let r = try await call(["cmd": "timer_add", "sites": sites, "periods": periods, "name": name])
+            remember(sites)
+            toast = r.message ?? "Temporizador criado."
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    func useTimer(_ id: String, period: Int) async {
+        do {
+            let r = try await call(["cmd": "timer_use", "id": id, "period": period])
+            toast = r.message
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func removeTimer(_ id: String) async {
+        do {
+            let r = try await call(["cmd": "timer_remove", "id": id])
+            toast = r.message
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     private func remember(_ sites: [String]) {
         recent = Array((sites + recent.filter { !sites.contains($0) }).prefix(12))
         UserDefaults.standard.set(recent, forKey: "recentSites")
@@ -276,6 +337,39 @@ func scheduleActive(_ s: SchedDTO, at now: Date) -> Bool {
     if s.from == s.to { return has(today) }
     if s.from < s.to { return has(today) && m >= s.from && m < s.to }
     return (has(today) && m >= s.from) || (has(yesterday) && m < s.to)
+}
+
+enum PeriodStatus: Equatable {
+    case available
+    case inUse(until: Date)
+    case used
+    case outside
+}
+
+/// Mesmas regras do serviço (state.Timer.PeriodStatus); quem decide é o serviço.
+func periodStatus(_ t: TimerDTO, _ i: Int, at now: Date) -> PeriodStatus {
+    let tz = TimeZone(identifier: t.tz) ?? .current
+    let f = DateFormatter()
+    f.locale = Locale(identifier: "en_US_POSIX")
+    f.calendar = Calendar(identifier: .gregorian)
+    f.timeZone = tz
+    f.dateFormat = "yyyy-MM-dd"
+    let today = f.string(from: now)
+    guard t.periods.indices.contains(i) else { return .outside }
+    var used = false
+    for u in t.uses ?? [] where u.period == i {
+        if u.startDate <= now && now < u.endDate {
+            return .inUse(until: u.endDate)
+        }
+        if u.day == today { used = true }
+    }
+    if used { return .used }
+    var cal = Calendar(identifier: .gregorian)
+    cal.timeZone = tz
+    let c = cal.dateComponents([.hour, .minute], from: now)
+    let m = (c.hour ?? 0) * 60 + (c.minute ?? 0)
+    let p = t.periods[i]
+    return m >= p.from && m < p.to ? .available : .outside
 }
 
 // MARK: - Componentes
@@ -438,6 +532,7 @@ struct ContentView: View {
                         LockCard()
                         ActiveCard()
                         SchedulesCard()
+                        TimersCard()
                     }
                     .padding(20)
                 }
@@ -798,6 +893,202 @@ struct NewScheduleView: View {
             }
         } message: {
             Text("\(orderedDays.map { dayNames[$0] }.joined(separator: ", ")), das \(hhmm(from)) às \(hhmm(to)).\nPara remover, demora 24 horas.")
+        }
+    }
+}
+
+// MARK: - Temporizador
+
+struct TimersCard: View {
+    @EnvironmentObject var model: Model
+    @State private var showNew = false
+    @State private var removing: TimerDTO?
+    @State private var using: (TimerDTO, Int)?
+
+    var body: some View {
+        Card(title: "Temporizador") {
+            let timers = model.resp?.state?.timers ?? []
+            if timers.isEmpty {
+                Text("Sem temporizadores. Os sites ficam sempre bloqueados, com alguns minutos livres em cada período do dia.")
+                    .foregroundStyle(.secondary)
+            }
+            TimelineView(.periodic(from: .now, by: 1)) { _ in
+                let now = model.now
+                VStack(spacing: 8) {
+                    ForEach(timers) { t in
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text((t.name.isEmpty ? "" : t.name + " · ") + sitesLabel(t.sites)).fontWeight(.semibold)
+                                    if let r = parseDate(t.removeAfter) {
+                                        Text("sai \(formatEnd(r))").font(.caption).foregroundStyle(.secondary)
+                                    }
+                                }
+                                Spacer()
+                                if t.removeAfter == nil {
+                                    Button("Remover") { removing = t }
+                                }
+                            }
+                            ForEach(Array(t.periods.enumerated()), id: \.offset) { i, p in
+                                periodRow(t, i, p, now: now)
+                            }
+                        }
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.05)))
+                    }
+                }
+            }
+            Button {
+                showNew = true
+            } label: {
+                Label("Novo temporizador", systemImage: "plus")
+            }
+            .buttonStyle(.link)
+        }
+        .sheet(isPresented: $showNew) {
+            NewTimerView().environmentObject(model)
+        }
+        .alert("Remover este temporizador?",
+               isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }),
+               presenting: removing) { t in
+            Button("Voltar", role: .cancel) {}
+            Button("Pedir remoção", role: .destructive) { Task { await model.removeTimer(t.id) } }
+        } message: { _ in
+            Text("Os sites continuam bloqueados durante mais 24 horas.")
+        }
+        .alert(using.map { "Usar \($0.0.periods[$0.1].minutes) min agora?" } ?? "",
+               isPresented: Binding(get: { using != nil }, set: { if !$0 { using = nil } }),
+               presenting: using) { u in
+            Button("Voltar", role: .cancel) {}
+            Button("Usar agora") { Task { await model.useTimer(u.0.id, period: u.1) } }
+        } message: { u in
+            Text("\(sitesLabel(u.0.sites)) fica desbloqueado durante \(u.0.periods[u.1].minutes) minutos e depois volta a bloquear sozinho.\nNão dá para pausar nem repetir neste período hoje.")
+        }
+    }
+
+    @ViewBuilder
+    private func periodRow(_ t: TimerDTO, _ i: Int, _ p: PeriodDTO, now: Date) -> some View {
+        HStack(spacing: 10) {
+            let status = periodStatus(t, i, at: now)
+            Circle().fill(color(status)).frame(width: 9, height: 9)
+            Text("\(hhmm(p.from))–\(hhmm(p.to)) · \(p.minutes) min").monospacedDigit()
+            Spacer()
+            switch status {
+            case .available:
+                Button("Usar \(p.minutes) min") { using = (t, i) }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.green)
+            case .inUse(let until):
+                Text("Livre · " + formatLeft(until.timeIntervalSince(now)))
+                    .font(.body.monospacedDigit().weight(.bold))
+                    .foregroundStyle(.green)
+            case .used:
+                Text("Já usado hoje").foregroundStyle(.secondary)
+            case .outside:
+                Text("Fora do horário").foregroundStyle(.secondary)
+            }
+        }
+        .font(.callout)
+    }
+
+    private func color(_ s: PeriodStatus) -> Color {
+        switch s {
+        case .available: return .green
+        case .inUse: return .green
+        case .used: return .red
+        case .outside: return Color.secondary.opacity(0.3)
+        }
+    }
+}
+
+struct PeriodDraft: Identifiable {
+    let id = UUID()
+    var from: Date
+    var to: Date
+    var minutes: Int
+}
+
+func timeToday(_ h: Int, _ m: Int) -> Date {
+    Calendar.current.date(bySettingHour: h, minute: m, second: 0, of: Date()) ?? Date()
+}
+
+struct NewTimerView: View {
+    @EnvironmentObject var model: Model
+    @Environment(\.dismiss) private var dismiss
+    @State private var sites: [String] = []
+    @State private var periods = [
+        PeriodDraft(from: timeToday(6, 0), to: timeToday(12, 0), minutes: 10),
+        PeriodDraft(from: timeToday(18, 0), to: timeToday(23, 59), minutes: 10),
+    ]
+    @State private var name = ""
+    @State private var confirming = false
+
+    private var summary: String {
+        periods.map { "\(hhmm($0.from))–\(hhmm($0.to)): \($0.minutes) min" }.joined(separator: "\n")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Novo temporizador").font(.title2.weight(.bold))
+            Text("Os sites ficam sempre bloqueados. Em cada período pode desbloqueá-los uma vez por dia, durante os minutos escolhidos.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            SiteInput(sites: $sites)
+
+            Text("Períodos").font(.subheadline).foregroundStyle(.secondary)
+            ForEach($periods) { $p in
+                HStack(spacing: 12) {
+                    DatePicker("Das", selection: $p.from, displayedComponents: .hourAndMinute).fixedSize()
+                    DatePicker("às", selection: $p.to, displayedComponents: .hourAndMinute).fixedSize()
+                    Stepper("\(p.minutes) min", value: $p.minutes, in: 1...240).fixedSize()
+                    Spacer()
+                    if periods.count > 1 {
+                        Button {
+                            periods.removeAll { $0.id == p.id }
+                        } label: {
+                            Image(systemName: "minus.circle")
+                        }
+                        .buttonStyle(.plain)
+                        .help("Tirar período")
+                    }
+                }
+            }
+            Button {
+                periods.append(PeriodDraft(from: timeToday(12, 0), to: timeToday(14, 0), minutes: 10))
+            } label: {
+                Label("Adicionar período", systemImage: "plus")
+            }
+            .buttonStyle(.link)
+
+            TextField("Nome (opcional), ex.: redes sociais", text: $name).textFieldStyle(.roundedBorder)
+
+            Text("Cada período só pode ser usado uma vez por dia, sem pausas. Remover um temporizador só tem efeito 24 horas depois.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack {
+                Spacer()
+                Button("Cancelar") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Criar temporizador") { confirming = true }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.red)
+                    .disabled(sites.isEmpty || periods.isEmpty)
+            }
+        }
+        .padding(24)
+        .frame(width: 560)
+        .alert("Bloquear \(sitesLabel(sites))?", isPresented: $confirming) {
+            Button("Voltar", role: .cancel) {}
+            Button("Criar temporizador", role: .destructive) {
+                Task {
+                    let body: [[String: Any]] = periods.map { ["from": hhmm($0.from), "to": hhmm($0.to), "minutes": $0.minutes] }
+                    let ok = await model.addTimer(sites: sites, periods: body, name: name.trimmingCharacters(in: .whitespaces))
+                    if ok { dismiss() }
+                }
+            }
+        } message: {
+            Text("Fica bloqueado a partir de agora, com pausas em:\n\(summary)\nPara remover, demora 24 horas.")
         }
     }
 }

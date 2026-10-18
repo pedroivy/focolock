@@ -16,9 +16,16 @@ focolock bloquear --por 2h youtube.com x.com
 focolock bloquear --ate 18:00 instagram.com
 focolock agendar --dias seg-sex --das 09:00 --ate 18:00 --nome trabalho youtube.com reddit.com
 focolock agendar --dias todos --das 23:00 --ate 07:00 --nome sono x.com    # atravessa a meia-noite
+focolock temporizador --periodos 06:00-12:00=10,18:00-23:59=10 --nome redes instagram.com
+focolock usar <id> 1           # gasta os 10 min do 1.º período (uma vez por dia)
 focolock status
 focolock remover <id>          # só vale daqui a 24h, e nunca no meio de uma janela ativa
 ```
+
+**Temporizador:** os sites ficam sempre bloqueados. Em cada período do dia
+pode desbloqueá-los uma única vez, durante os minutos definidos; depois voltam
+a bloquear sozinhos. Não dá para pausar nem repetir, e conta a hora confiável
+do serviço, por isso mudar a hora do Mac não dá minutos extra.
 
 Não existe comando para cancelar ou encurtar um bloqueio. Esse é o ponto.
 

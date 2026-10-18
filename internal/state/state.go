@@ -41,9 +41,23 @@ type Schedule struct {
 type State struct {
 	Locks     []Lock     `json:"locks"`
 	Schedules []Schedule `json:"schedules"`
+	Timers    []Timer    `json:"timers,omitempty"`
 	// Relógio confiável (ver pacote clock).
 	ClockOffset time.Duration `json:"clock_offset"`
 	LastTrusted time.Time     `json:"last_trusted"`
+}
+
+// Clone copia o estado para ser enviado sem segurar o mutex do daemon.
+func (st *State) Clone() *State {
+	out := *st
+	out.Locks = append([]Lock(nil), st.Locks...)
+	out.Schedules = append([]Schedule(nil), st.Schedules...)
+	out.Timers = make([]Timer, len(st.Timers))
+	for i, t := range st.Timers {
+		t.Uses = append([]TimerUse(nil), t.Uses...)
+		out.Timers[i] = t
+	}
+	return &out
 }
 
 func NewID() string {
@@ -114,6 +128,13 @@ func (st *State) ActiveSites(now time.Time) []string {
 			}
 		}
 	}
+	for _, t := range st.Timers {
+		if t.Blocking(now) {
+			for _, s := range t.Sites {
+				set[s] = true
+			}
+		}
+	}
 	out := make([]string, 0, len(set))
 	for s := range set {
 		out = append(out, s)
@@ -132,6 +153,11 @@ func (st *State) Guarded(now time.Time) bool {
 	}
 	for _, sc := range st.Schedules {
 		if !sc.Removed(now) {
+			return true
+		}
+	}
+	for _, t := range st.Timers {
+		if !t.Removed(now) {
 			return true
 		}
 	}
@@ -159,10 +185,23 @@ func (st *State) Prune(now time.Time) bool {
 		}
 	}
 	st.Schedules = scheds
+	timers := st.Timers[:0]
+	for _, t := range st.Timers {
+		if t.Removed(now) {
+			changed = true
+			continue
+		}
+		if t.pruneUses(now) {
+			changed = true
+		}
+		timers = append(timers, t)
+	}
+	st.Timers = timers
 	return changed
 }
 
-// RequestRemoval agenda a remoção de um agendamento para daqui a RemovalDelay.
+// RequestRemoval agenda a remoção de um agendamento ou temporizador para daqui
+// a RemovalDelay.
 func (st *State) RequestRemoval(id string, now time.Time) (time.Time, error) {
 	for i := range st.Schedules {
 		sc := &st.Schedules[i]
@@ -176,7 +215,19 @@ func (st *State) RequestRemoval(id string, now time.Time) (time.Time, error) {
 		sc.RemoveAfter = &at
 		return at, nil
 	}
-	return time.Time{}, fmt.Errorf("agendamento %q não encontrado", id)
+	for i := range st.Timers {
+		t := &st.Timers[i]
+		if t.ID != id {
+			continue
+		}
+		if t.RemoveAfter != nil {
+			return *t.RemoveAfter, nil
+		}
+		at := now.Add(RemovalDelay)
+		t.RemoveAfter = &at
+		return at, nil
+	}
+	return time.Time{}, fmt.Errorf("agendamento ou temporizador %q não encontrado", id)
 }
 
 // Merge une dois estados (arquivo principal + backup). Ninguém consegue
@@ -210,6 +261,8 @@ func Merge(a, b *State) *State {
 		out.Schedules = append(out.Schedules, s)
 	}
 	sort.Slice(out.Schedules, func(i, j int) bool { return out.Schedules[i].Created.Before(out.Schedules[j].Created) })
+
+	out.Timers = mergeTimers(a.Timers, b.Timers)
 
 	out.ClockOffset, out.LastTrusted = a.ClockOffset, a.LastTrusted
 	if b.LastTrusted.After(a.LastTrusted) {
