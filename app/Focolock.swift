@@ -36,6 +36,7 @@ struct Resp: Decodable {
     let message: String?
     let now: String?
     let active: [String]?
+    let allow: [String]?
     let state: StateDTO?
 }
 
@@ -48,6 +49,7 @@ struct StateDTO: Decodable {
 struct LockDTO: Decodable, Identifiable {
     let id: String
     let sites: [String]
+    let allow: [String]?
     let end: String
     var endDate: Date { parseDate(end) ?? .distantPast }
 }
@@ -56,6 +58,7 @@ struct SchedDTO: Decodable, Identifiable {
     let id: String
     let name: String
     let sites: [String]
+    let allow: [String]?
     let days: [Int]
     let from: Int
     let to: Int
@@ -63,7 +66,7 @@ struct SchedDTO: Decodable, Identifiable {
     let removeAfter: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, name, sites, days, from, to, tz
+        case id, name, sites, allow, days, from, to, tz
         case removeAfter = "remove_after"
     }
 }
@@ -72,13 +75,14 @@ struct TimerDTO: Decodable, Identifiable {
     let id: String
     let name: String
     let sites: [String]
+    let allow: [String]?
     let periods: [PeriodDTO]
     let tz: String
     let uses: [UseDTO]?
     let removeAfter: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, name, sites, periods, tz, uses
+        case id, name, sites, allow, periods, tz, uses
         case removeAfter = "remove_after"
     }
 }
@@ -182,13 +186,13 @@ final class Model: ObservableObject {
         }
     }
 
-    func lock(sites: [String], minutes: Int?, until: String?) async -> Bool {
-        var body: [String: Any] = ["cmd": "lock", "sites": sites]
+    func lock(sites: [String], allow: [String], minutes: Int?, until: String?) async -> Bool {
+        var body: [String: Any] = ["cmd": "lock", "sites": sites, "allow": allow]
         if let m = minutes { body["for"] = Int64(m) * 60_000_000_000 }
         if let u = until { body["until"] = u }
         do {
             let r = try await call(body)
-            remember(sites)
+            remember(sites + allow)
             toast = r.message ?? "Bloqueado."
             return true
         } catch {
@@ -197,10 +201,10 @@ final class Model: ObservableObject {
         }
     }
 
-    func addSchedule(sites: [String], days: [Int], from: String, to: String, name: String) async -> Bool {
+    func addSchedule(sites: [String], allow: [String], days: [Int], from: String, to: String, name: String) async -> Bool {
         do {
-            _ = try await call(["cmd": "schedule_add", "sites": sites, "days": days, "from": from, "to": to, "name": name])
-            remember(sites)
+            _ = try await call(["cmd": "schedule_add", "sites": sites, "allow": allow, "days": days, "from": from, "to": to, "name": name])
+            remember(sites + allow)
             toast = "Horário criado."
             return true
         } catch {
@@ -218,10 +222,10 @@ final class Model: ObservableObject {
         }
     }
 
-    func addTimer(sites: [String], periods: [[String: Any]], name: String) async -> Bool {
+    func addTimer(sites: [String], allow: [String], periods: [[String: Any]], name: String) async -> Bool {
         do {
-            let r = try await call(["cmd": "timer_add", "sites": sites, "periods": periods, "name": name])
-            remember(sites)
+            let r = try await call(["cmd": "timer_add", "sites": sites, "allow": allow, "periods": periods, "name": name])
+            remember(sites + allow)
             toast = r.message ?? "Temporizador criado."
             return true
         } catch {
@@ -249,6 +253,7 @@ final class Model: ObservableObject {
     }
 
     private func remember(_ sites: [String]) {
+        let sites = sites.filter { $0 != internet }
         recent = Array((sites + recent.filter { !sites.contains($0) }).prefix(12))
         UserDefaults.standard.set(recent, forKey: "recentSites")
     }
@@ -283,7 +288,13 @@ let dayNames = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"]
 let internet = "*"
 
 func siteLabel(_ s: String) -> String { s == internet ? "Toda a internet" : s }
-func sitesLabel(_ list: [String]) -> String { list.map(siteLabel).joined(separator: ", ") }
+func sitesLabel(_ list: [String], allow: [String]? = nil) -> String {
+    var label = list.map(siteLabel).joined(separator: ", ")
+    if list.contains(internet), let allow, !allow.isEmpty {
+        label += " (exceto " + allow.joined(separator: ", ") + ")"
+    }
+    return label
+}
 
 /// "https://www.YouTube.com/watch?v=1" -> "youtube.com"
 func normalizeSite(_ raw: String) -> String? {
@@ -297,6 +308,12 @@ func normalizeSite(_ raw: String) -> String? {
     if h.hasSuffix(".") { h.removeLast() }
     guard h.contains("."), h.range(of: "^[a-z0-9.-]+$", options: .regularExpression) != nil else { return nil }
     return h
+}
+
+func internetWarning(_ allow: [String]) -> String {
+    let what = "email, mensagens, chamadas, atualizações"
+    if allow.isEmpty { return "Sem internet nada funciona: \(what).\n" }
+    return "Só funciona: \(allow.joined(separator: ", ")). O resto (\(what)) fica bloqueado.\n"
 }
 
 func formatEnd(_ d: Date) -> String {
@@ -428,8 +445,11 @@ struct Card<Content: View>: View {
 
 struct Chip: View {
     let text: String
+    var allowed = false // exceção ao bloqueio da internet
     var onRemove: (() -> Void)? = nil
     var onAdd: (() -> Void)? = nil
+
+    private var tint: Color { onAdd != nil ? .primary : (allowed ? .green : .red) }
 
     var body: some View {
         HStack(spacing: 5) {
@@ -444,8 +464,8 @@ struct Chip: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
-        .background(Capsule().fill(onAdd != nil ? Color.primary.opacity(0.07) : Color.red.opacity(0.14)))
-        .foregroundStyle(onAdd != nil ? Color.primary : Color.red)
+        .background(Capsule().fill(onAdd != nil ? Color.primary.opacity(0.07) : tint.opacity(0.14)))
+        .foregroundStyle(tint)
         .contentShape(Capsule())
         .onTapGesture { onAdd?() }
     }
@@ -462,15 +482,40 @@ struct Row<Content: View>: View {
 }
 
 /// Campo para colar links. Aceita vários de uma vez (separados por espaço, vírgula ou linha).
+/// Tem dois modos: bloquear sites específicos, ou toda a internet com exceções.
 struct SiteInput: View {
     @Binding var sites: [String]
+    @Binding var allow: [String]
     @State private var text = ""
     @State private var invalid: String?
 
+    private var internetMode: Binding<Bool> {
+        Binding(get: { sites.contains(internet) },
+                set: { on in
+                    sites = on ? [internet] : []
+                    allow = []
+                    invalid = nil
+                })
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            Picker("O que bloquear", selection: internetMode) {
+                Text("Sites").tag(false)
+                Label("Toda a internet", systemImage: "globe").tag(true)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+
+            if internetMode.wrappedValue {
+                Text("Tudo fica bloqueado, exceto os sites que adicionar aqui.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
             HStack {
-                TextField("Cola aqui o link — ex.: youtube.com", text: $text)
+                TextField(internetMode.wrappedValue ? "Site que continua a funcionar — ex.: wikipedia.org"
+                                                    : "Cola aqui o link — ex.: youtube.com", text: $text)
                     .textFieldStyle(.roundedBorder)
                     .controlSize(.large)
                     .onSubmit(add)
@@ -481,15 +526,15 @@ struct SiteInput: View {
             if let invalid {
                 Text("\"\(invalid)\" não parece um site").font(.caption).foregroundStyle(.red)
             }
-            if !sites.contains(internet) {
-                Button {
-                    sites.insert(internet, at: 0)
-                } label: {
-                    Label("Bloquear toda a internet", systemImage: "globe")
+            if internetMode.wrappedValue {
+                if !allow.isEmpty {
+                    FlowLayout {
+                        ForEach(allow, id: \.self) { s in
+                            Chip(text: s, allowed: true, onRemove: { allow.removeAll { $0 == s } })
+                        }
+                    }
                 }
-                .buttonStyle(.link)
-            }
-            if !sites.isEmpty {
+            } else if !sites.isEmpty {
                 FlowLayout {
                     ForEach(sites, id: \.self) { s in
                         Chip(text: s, onRemove: { sites.removeAll { $0 == s } })
@@ -502,8 +547,12 @@ struct SiteInput: View {
     private func add() {
         invalid = nil
         for part in text.split(whereSeparator: { $0 == " " || $0 == "," || $0 == "\n" }) {
-            if let h = normalizeSite(String(part)) {
-                if !sites.contains(h) { sites.append(h) }
+            if let h = normalizeSite(String(part)), h != internet {
+                if internetMode.wrappedValue {
+                    if !allow.contains(h) { allow.append(h) }
+                } else if !sites.contains(h) {
+                    sites.append(h)
+                }
             } else {
                 invalid = String(part)
             }
@@ -583,12 +632,25 @@ struct Header: View {
             Spacer()
             let active = model.resp?.active ?? []
             let n = active.count
-            Text(active.contains(internet) ? "Internet bloqueada" : (n == 0 ? "Nada bloqueado" : (n == 1 ? "1 site bloqueado" : "\(n) sites bloqueados")))
+            Text(summary(active))
                 .font(.callout.weight(n > 0 ? .semibold : .regular))
                 .padding(.horizontal, 11)
                 .padding(.vertical, 5)
                 .background(Capsule().fill(n > 0 ? Color.red.opacity(0.14) : Color.primary.opacity(0.06)))
                 .foregroundStyle(n > 0 ? Color.red : Color.secondary)
+        }
+    }
+
+    private func summary(_ active: [String]) -> String {
+        if active.contains(internet) {
+            let e = model.resp?.allow?.count ?? 0
+            if e == 0 { return "Internet bloqueada" }
+            return "Internet bloqueada · " + (e == 1 ? "1 exceção" : "\(e) exceções")
+        }
+        switch active.count {
+        case 0: return "Nada bloqueado"
+        case 1: return "1 site bloqueado"
+        default: return "\(active.count) sites bloqueados"
         }
     }
 }
@@ -628,6 +690,7 @@ enum DurationChoice: Hashable {
 struct LockCard: View {
     @EnvironmentObject var model: Model
     @State private var sites: [String] = []
+    @State private var allow: [String] = []
     @State private var choice: DurationChoice = .minutes(60)
     @State private var untilTime = Date().addingTimeInterval(3600)
     @State private var customValue = 30
@@ -654,22 +717,26 @@ struct LockCard: View {
     private var buttonTitle: String {
         switch sites.count {
         case 0: return "Bloquear"
-        case 1: return sites[0] == internet ? "Bloquear toda a internet" : "Bloquear \(sites[0])"
+        case 1 where sites[0] == internet:
+            if allow.isEmpty { return "Bloquear toda a internet" }
+            return "Bloquear a internet (" + (allow.count == 1 ? "1 exceção" : "\(allow.count) exceções") + ")"
+        case 1: return "Bloquear \(sites[0])"
         default: return "Bloquear \(sites.count) sites"
         }
     }
 
     var body: some View {
-        Card(title: "Bloquear um site") {
-            SiteInput(sites: $sites)
+        Card(title: "Bloquear agora") {
+            SiteInput(sites: $sites, allow: $allow)
 
-            let rec = model.recent.filter { !sites.contains($0) }
+            let isInternet = sites.contains(internet)
+            let rec = model.recent.filter { !sites.contains($0) && !allow.contains($0) }
             if !rec.isEmpty {
                 HStack(alignment: .firstTextBaseline) {
                     Text("Recentes:").font(.caption).foregroundStyle(.secondary)
                     FlowLayout {
                         ForEach(rec, id: \.self) { s in
-                            Chip(text: s, onAdd: { sites.append(s) })
+                            Chip(text: s, onAdd: { if isInternet { allow.append(s) } else { sites.append(s) } })
                         }
                     }
                 }
@@ -720,12 +787,12 @@ struct LockCard: View {
             .tint(.red)
             .controlSize(.large)
             .disabled(sites.isEmpty || busy || (choice == .custom && customValue < 1))
-            .alert("Bloquear \(sitesLabel(sites))?", isPresented: $confirming) {
+            .alert("Bloquear \(sitesLabel(sites, allow: allow))?", isPresented: $confirming) {
                 Button("Voltar", role: .cancel) {}
                 Button("Bloquear", role: .destructive) { Task { await doLock() } }
             } message: {
                 Text("Fica bloqueado até \(formatEnd(endDate)).\n"
-                     + (sites.contains(internet) ? "Sem internet nada funciona: email, mensagens, chamadas, atualizações.\n" : "")
+                     + (sites.contains(internet) ? internetWarning(allow) : "")
                      + "Não é possível cancelar depois.")
             }
         }
@@ -737,13 +804,13 @@ struct LockCard: View {
         let ok: Bool
         switch choice {
         case .minutes(let m):
-            ok = await model.lock(sites: sites, minutes: m, until: nil)
+            ok = await model.lock(sites: sites, allow: allow, minutes: m, until: nil)
         case .custom:
-            ok = await model.lock(sites: sites, minutes: customValue * customUnit, until: nil)
+            ok = await model.lock(sites: sites, allow: allow, minutes: customValue * customUnit, until: nil)
         case .until:
-            ok = await model.lock(sites: sites, minutes: nil, until: hhmm(untilTime))
+            ok = await model.lock(sites: sites, allow: allow, minutes: nil, until: hhmm(untilTime))
         }
-        if ok { sites = [] }
+        if ok { sites = []; allow = [] }
     }
 }
 
@@ -762,7 +829,7 @@ struct ActiveCard: View {
                         ForEach(locks) { l in
                             Row {
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(sitesLabel(l.sites)).fontWeight(.semibold)
+                                    Text(sitesLabel(l.sites, allow: l.allow)).fontWeight(.semibold)
                                     Text("até \(formatEnd(l.endDate))").font(.caption).foregroundStyle(.secondary)
                                 }
                                 Spacer()
@@ -795,7 +862,7 @@ struct SchedulesCard: View {
                         .fill(scheduleActive(s, at: model.now) ? Color.red : Color.secondary.opacity(0.3))
                         .frame(width: 9, height: 9)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text((s.name.isEmpty ? "" : s.name + " · ") + sitesLabel(s.sites)).fontWeight(.semibold)
+                        Text((s.name.isEmpty ? "" : s.name + " · ") + sitesLabel(s.sites, allow: s.allow)).fontWeight(.semibold)
                         Text(meta(s)).font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
@@ -836,6 +903,7 @@ struct NewScheduleView: View {
     @EnvironmentObject var model: Model
     @Environment(\.dismiss) private var dismiss
     @State private var sites: [String] = []
+    @State private var allow: [String] = []
     @State private var days: Set<Int> = [1, 2, 3, 4, 5]
     @State private var from = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: Date()) ?? Date()
     @State private var to = Calendar.current.date(bySettingHour: 18, minute: 0, second: 0, of: Date()) ?? Date()
@@ -847,7 +915,7 @@ struct NewScheduleView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Novo horário").font(.title2.weight(.bold))
-            SiteInput(sites: $sites)
+            SiteInput(sites: $sites, allow: $allow)
 
             Text("Dias").font(.subheadline).foregroundStyle(.secondary)
             HStack(spacing: 6) {
@@ -882,11 +950,11 @@ struct NewScheduleView: View {
         }
         .padding(24)
         .frame(width: 520)
-        .alert("Bloquear \(sitesLabel(sites))?", isPresented: $confirming) {
+        .alert("Bloquear \(sitesLabel(sites, allow: allow))?", isPresented: $confirming) {
             Button("Voltar", role: .cancel) {}
             Button("Criar horário", role: .destructive) {
                 Task {
-                    let ok = await model.addSchedule(sites: sites, days: orderedDays, from: hhmm(from), to: hhmm(to),
+                    let ok = await model.addSchedule(sites: sites, allow: allow, days: orderedDays, from: hhmm(from), to: hhmm(to),
                                                      name: name.trimmingCharacters(in: .whitespaces))
                     if ok { dismiss() }
                 }
@@ -919,7 +987,7 @@ struct TimersCard: View {
                         VStack(alignment: .leading, spacing: 8) {
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text((t.name.isEmpty ? "" : t.name + " · ") + sitesLabel(t.sites)).fontWeight(.semibold)
+                                    Text((t.name.isEmpty ? "" : t.name + " · ") + sitesLabel(t.sites, allow: t.allow)).fontWeight(.semibold)
                                     if let r = parseDate(t.removeAfter) {
                                         Text("sai \(formatEnd(r))").font(.caption).foregroundStyle(.secondary)
                                     }
@@ -1017,6 +1085,7 @@ struct NewTimerView: View {
     @EnvironmentObject var model: Model
     @Environment(\.dismiss) private var dismiss
     @State private var sites: [String] = []
+    @State private var allow: [String] = []
     @State private var periods = [
         PeriodDraft(from: timeToday(6, 0), to: timeToday(12, 0), minutes: 10),
         PeriodDraft(from: timeToday(18, 0), to: timeToday(23, 59), minutes: 10),
@@ -1034,7 +1103,7 @@ struct NewTimerView: View {
             Text("Os sites ficam sempre bloqueados. Em cada período pode desbloqueá-los uma vez por dia, durante os minutos escolhidos.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
-            SiteInput(sites: $sites)
+            SiteInput(sites: $sites, allow: $allow)
 
             Text("Períodos").font(.subheadline).foregroundStyle(.secondary)
             ForEach($periods) { $p in
@@ -1078,12 +1147,12 @@ struct NewTimerView: View {
         }
         .padding(24)
         .frame(width: 560)
-        .alert("Bloquear \(sitesLabel(sites))?", isPresented: $confirming) {
+        .alert("Bloquear \(sitesLabel(sites, allow: allow))?", isPresented: $confirming) {
             Button("Voltar", role: .cancel) {}
             Button("Criar temporizador", role: .destructive) {
                 Task {
                     let body: [[String: Any]] = periods.map { ["from": hhmm($0.from), "to": hhmm($0.to), "minutes": $0.minutes] }
-                    let ok = await model.addTimer(sites: sites, periods: body, name: name.trimmingCharacters(in: .whitespaces))
+                    let ok = await model.addTimer(sites: sites, allow: allow, periods: body, name: name.trimmingCharacters(in: .whitespaces))
                     if ok { dismiss() }
                 }
             }

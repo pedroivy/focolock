@@ -31,18 +31,43 @@ func TestRenderHostsNoTrailingNewline(t *testing.T) {
 }
 
 func TestRenderPF(t *testing.T) {
-	got := RenderPF([]string{"1.2.3.4"}, []string{"8.8.8.8"}, false)
+	got := RenderPF([]string{"1.2.3.4"}, []string{"8.8.8.8"}, false, nil)
 	for _, want := range []string{"<focolock_sites> const { 1.2.3.4 }", "to <focolock_doh> port 443"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("faltou %q em:\n%s", want, got)
 		}
 	}
-	if strings.Contains(RenderPF(nil, nil, false), "block") {
+	if strings.Contains(RenderPF(nil, nil, false, nil), "block") {
 		t.Error("sem sites não deveria haver regras")
 	}
-	all := RenderPF([]string{"1.2.3.4"}, []string{"8.8.8.8"}, true)
+	all := RenderPF([]string{"1.2.3.4"}, []string{"8.8.8.8"}, true, nil)
 	// O loopback tem de passar antes do bloqueio total, senão a app perde o serviço.
 	if i, j := strings.Index(all, "pass out quick on lo0"), strings.Index(all, "block drop out quick all"); i < 0 || j < 0 || i > j {
 		t.Errorf("regras de internet erradas:\n%s", all)
+	}
+}
+
+func TestRenderPFInternetWithExceptions(t *testing.T) {
+	got := RenderPF(nil, []string{"8.8.8.8"}, true, []string{"1.2.3.4", "2001:db8::1"})
+	order := []string{
+		"table <focolock_allow> const { 1.2.3.4, 2001:db8::1 }",
+		"table <focolock_doh> const { 8.8.8.8 }",
+		"pass out quick on lo0",
+		"to <focolock_doh> port { 443, 853 }",
+		"pass out quick proto { tcp, udp } from any to any port 53",
+		"pass out quick from any to <focolock_allow>",
+		"block drop out quick all",
+	}
+	last := -1
+	for _, want := range order {
+		i := strings.Index(got, want)
+		if i < 0 || i < last {
+			t.Fatalf("faltou ou fora de ordem %q em:\n%s", want, got)
+		}
+		last = i
+	}
+	// Sem exceções, nem o DNS passa.
+	if strings.Contains(RenderPF(nil, nil, true, nil), "port 53") {
+		t.Error("sem exceções o DNS não deveria passar")
 	}
 }

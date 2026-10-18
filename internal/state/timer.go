@@ -12,6 +12,7 @@ type Timer struct {
 	ID      string        `json:"id"`
 	Name    string        `json:"name"`
 	Sites   []string      `json:"sites"`
+	Allow   []string      `json:"allow,omitempty"` // com "*": sites que continuam acessíveis
 	Periods []TimerPeriod `json:"periods"`
 	TZ      string        `json:"tz"` // fixado na criação, como nos agendamentos
 	Created time.Time     `json:"created"`
@@ -185,12 +186,13 @@ func mergeTimers(a, b []Timer) []Timer {
 			order = append(order, t.ID)
 			continue
 		}
-		uses := cur.Uses
+		uses, allow := cur.Uses, intersect(cur.Allow, t.Allow)
 		// Prevalece o pedido de remoção mais tardio (ou nenhum).
 		if cur.RemoveAfter != nil && (t.RemoveAfter == nil || t.RemoveAfter.After(*cur.RemoveAfter)) {
 			cur = t
 		}
 		cur.Uses = mergeUses(uses, t.Uses)
+		cur.Allow = allow
 		byID[t.ID] = cur
 	}
 	out := make([]Timer, 0, len(order))

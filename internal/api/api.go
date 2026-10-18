@@ -33,6 +33,8 @@ const (
 type Request struct {
 	Cmd   string   `json:"cmd"`
 	Sites []string `json:"sites,omitempty"`
+	// Allow: com Sites = ["*"] (toda a internet), sites que continuam acessíveis.
+	Allow []string `json:"allow,omitempty"`
 
 	// lock: duração OU horário de término "HH:MM" (próxima ocorrência, no fuso TZ).
 	For   time.Duration `json:"for,omitempty"`
@@ -67,6 +69,7 @@ type Response struct {
 	Message string       `json:"message,omitempty"`
 	Now     time.Time    `json:"now"`
 	Active  []string     `json:"active,omitempty"`
+	Allow   []string     `json:"allow,omitempty"` // exceções ativas ao bloqueio da internet
 	Guarded bool         `json:"guarded"`
 	State   *state.State `json:"state,omitempty"`
 }

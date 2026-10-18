@@ -117,11 +117,12 @@ func (d *Daemon) tick() {
 	d.mu.Lock()
 	pruned := d.st.Prune(now)
 	active := d.st.ActiveSites(now)
+	allow := d.st.ActiveAllow(now)
 	d.mu.Unlock()
 	if pruned {
 		d.save()
 	}
-	d.enf.Apply(active)
+	d.enf.Apply(active, allow)
 }
 
 func (d *Daemon) syncNTP() {
@@ -190,6 +191,7 @@ func (d *Daemon) Handle(req api.Request) *api.Response {
 		Message: msg,
 		Now:     now,
 		Active:  d.st.ActiveSites(now),
+		Allow:   d.st.ActiveAllow(now),
 		Guarded: d.st.Guarded(now),
 		State:   snapshot,
 	}
@@ -207,17 +209,25 @@ func (d *Daemon) apply(req api.Request, now time.Time) (string, error) {
 		if err != nil {
 			return "", err
 		}
+		allow, err := sites.NormalizeAllow(list, req.Allow)
+		if err != nil {
+			return "", err
+		}
 		end, err := lockEnd(req, now)
 		if err != nil {
 			return "", err
 		}
-		l := state.Lock{ID: state.NewID(), Sites: list, Start: now, End: end}
+		l := state.Lock{ID: state.NewID(), Sites: list, Allow: allow, Start: now, End: end}
 		d.st.Locks = append(d.st.Locks, l)
 		log.Printf("novo bloqueio %s até %s: %v", l.ID, end.Format(time.RFC3339), list)
 		return fmt.Sprintf("Bloqueado até %s.", end.In(loc(req.TZ)).Format("02/01 15:04")), nil
 
 	case api.CmdScheduleAdd:
 		list, err := sites.NormalizeAll(req.Sites)
+		if err != nil {
+			return "", err
+		}
+		allow, err := sites.NormalizeAllow(list, req.Allow)
 		if err != nil {
 			return "", err
 		}
@@ -233,7 +243,7 @@ func (d *Daemon) apply(req api.Request, now time.Time) (string, error) {
 			return "", fmt.Errorf("informe os dias")
 		}
 		sc := state.Schedule{
-			ID: state.NewID(), Name: req.Name, Sites: list, Days: req.Days,
+			ID: state.NewID(), Name: req.Name, Sites: list, Allow: allow, Days: req.Days,
 			From: from, To: to, TZ: loc(req.TZ).String(), Created: now,
 		}
 		d.st.Schedules = append(d.st.Schedules, sc)
@@ -245,12 +255,16 @@ func (d *Daemon) apply(req api.Request, now time.Time) (string, error) {
 		if err != nil {
 			return "", err
 		}
+		allow, err := sites.NormalizeAllow(list, req.Allow)
+		if err != nil {
+			return "", err
+		}
 		periods, err := timerPeriods(req.Periods)
 		if err != nil {
 			return "", err
 		}
 		t := state.Timer{
-			ID: state.NewID(), Name: req.Name, Sites: list, Periods: periods,
+			ID: state.NewID(), Name: req.Name, Sites: list, Allow: allow, Periods: periods,
 			TZ: loc(req.TZ).String(), Created: now,
 		}
 		d.st.Timers = append(d.st.Timers, t)

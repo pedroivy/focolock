@@ -23,6 +23,8 @@ const usage = `focolock — bloqueador de sites que não dá pra burlar fechando
 Uso:
   focolock bloquear --por 2h youtube.com x.com      bloqueia agora, por um tempo
   focolock bloquear --ate 18:00 instagram.com       bloqueia agora, até um horário
+  focolock bloquear --por 2h --exceto wikipedia.org,github.com internet
+                                                    toda a internet, menos alguns sites
   focolock agendar --dias seg-sex --das 09:00 --ate 18:00 [--nome trabalho] youtube.com
   focolock temporizador --periodos 06:00-12:00=10,18:00-23:59=10 [--nome redes] x.com
                                                     sempre bloqueado, com N minutos livres por período
@@ -34,6 +36,8 @@ Uso:
   sudo focolock instalar                            instala/atualiza o serviço
   sudo focolock desinstalar                         só funciona sem bloqueios ativos
 
+Sites: "internet" bloqueia toda a internet; --exceto lista os sites que continuam
+a funcionar (vale em bloquear, agendar e temporizador).
 Dias: dom seg ter qua qui sex sab, intervalos (seg-sex), listas (sab,dom) ou "todos".
 Bloqueios não podem ser cancelados nem encurtados. Pense antes de confirmar.
 `
@@ -129,9 +133,10 @@ func cmdLock(args []string) error {
 	fs := flag.NewFlagSet("bloquear", flag.ExitOnError)
 	por := fs.String("por", "", "duração (ex.: 45m, 2h, 1d)")
 	ate := fs.String("ate", "", "horário de término HH:MM")
+	exceto := fs.String("exceto", "", "com \"internet\": sites que continuam acessíveis, separados por vírgula")
 	yes := fs.Bool("s", false, "não pedir confirmação")
 	_ = fs.Parse(args)
-	req := api.Request{Cmd: api.CmdLock, Sites: fs.Args(), Until: *ate, TZ: localTZ()}
+	req := api.Request{Cmd: api.CmdLock, Sites: fs.Args(), Allow: splitList(*exceto), Until: *ate, TZ: localTZ()}
 	if *por != "" {
 		d, err := parseDuration(*por)
 		if err != nil {
@@ -142,7 +147,7 @@ func cmdLock(args []string) error {
 	if len(req.Sites) == 0 {
 		return fmt.Errorf("informe os sites. Ex.: focolock bloquear --por 2h youtube.com")
 	}
-	if !confirm(fmt.Sprintf("Bloquear %s? Não dá pra cancelar depois.", strings.Join(req.Sites, ", ")), *yes) {
+	if !confirm(fmt.Sprintf("Bloquear %s? Não dá pra cancelar depois.", describe(req.Sites, req.Allow)), *yes) {
 		return fmt.Errorf("cancelado")
 	}
 	resp, err := api.Call(req, 10*time.Second)
@@ -159,6 +164,7 @@ func cmdSchedule(args []string) error {
 	das := fs.String("das", "", "início HH:MM")
 	ate := fs.String("ate", "", "fim HH:MM (pode ser menor que o início: atravessa a meia-noite)")
 	nome := fs.String("nome", "", "nome do agendamento")
+	exceto := fs.String("exceto", "", "com \"internet\": sites que continuam acessíveis, separados por vírgula")
 	yes := fs.Bool("s", false, "não pedir confirmação")
 	_ = fs.Parse(args)
 	if *das == "" || *ate == "" {
@@ -172,12 +178,12 @@ func cmdSchedule(args []string) error {
 		return fmt.Errorf("informe os sites")
 	}
 	prompt := fmt.Sprintf("Bloquear %s em %s das %s às %s? Remover depois leva %v.",
-		strings.Join(fs.Args(), ", "), state.FormatDays(days), *das, *ate, state.RemovalDelay)
+		describe(fs.Args(), splitList(*exceto)), state.FormatDays(days), *das, *ate, state.RemovalDelay)
 	if !confirm(prompt, *yes) {
 		return fmt.Errorf("cancelado")
 	}
 	resp, err := api.Call(api.Request{
-		Cmd: api.CmdScheduleAdd, Sites: fs.Args(), Name: *nome,
+		Cmd: api.CmdScheduleAdd, Sites: fs.Args(), Allow: splitList(*exceto), Name: *nome,
 		Days: days, From: *das, To: *ate, TZ: localTZ(),
 	}, 10*time.Second)
 	if err != nil {
@@ -185,6 +191,25 @@ func cmdSchedule(args []string) error {
 	}
 	fmt.Println(resp.Message)
 	return nil
+}
+
+func splitList(s string) []string {
+	return strings.FieldsFunc(s, func(r rune) bool { return r == ',' || r == ' ' })
+}
+
+// describe mostra os sites como na app: "*" é "toda a internet".
+func describe(list, allow []string) string {
+	out := make([]string, len(list))
+	for i, s := range list {
+		if s == "*" || s == "internet" {
+			s = "toda a internet"
+			if len(allow) > 0 {
+				s += " (exceto " + strings.Join(allow, ", ") + ")"
+			}
+		}
+		out[i] = s
+	}
+	return strings.Join(out, ", ")
 }
 
 // parsePeriods lê "06:00-12:00=10,18:00-23:59=10".
@@ -206,6 +231,7 @@ func cmdTimer(args []string) error {
 	fs := flag.NewFlagSet("temporizador", flag.ExitOnError)
 	periodos := fs.String("periodos", "", "períodos, ex.: 06:00-12:00=10,18:00-23:59=10")
 	nome := fs.String("nome", "", "nome do temporizador")
+	exceto := fs.String("exceto", "", "com \"internet\": sites que continuam acessíveis, separados por vírgula")
 	yes := fs.Bool("s", false, "não pedir confirmação")
 	_ = fs.Parse(args)
 	if *periodos == "" {
@@ -219,12 +245,12 @@ func cmdTimer(args []string) error {
 		return fmt.Errorf("informe os sites")
 	}
 	prompt := fmt.Sprintf("Bloquear %s sempre, com pausas em %s? Remover depois leva %v.",
-		strings.Join(fs.Args(), ", "), *periodos, state.RemovalDelay)
+		describe(fs.Args(), splitList(*exceto)), *periodos, state.RemovalDelay)
 	if !confirm(prompt, *yes) {
 		return fmt.Errorf("cancelado")
 	}
 	resp, err := api.Call(api.Request{
-		Cmd: api.CmdTimerAdd, Sites: fs.Args(), Name: *nome, Periods: periods, TZ: localTZ(),
+		Cmd: api.CmdTimerAdd, Sites: fs.Args(), Allow: splitList(*exceto), Name: *nome, Periods: periods, TZ: localTZ(),
 	}, 10*time.Second)
 	if err != nil {
 		return err
@@ -275,14 +301,14 @@ func cmdStatus() error {
 	if len(resp.Active) == 0 {
 		fmt.Println("\nNada bloqueado agora.")
 	} else {
-		fmt.Printf("\nBloqueado agora: %s\n", strings.Join(resp.Active, ", "))
+		fmt.Printf("\nBloqueado agora: %s\n", describe(resp.Active, resp.Allow))
 	}
 	st := resp.State
 	if len(st.Locks) > 0 {
 		fmt.Println("\nBloqueios:")
 		for _, l := range st.Locks {
 			left := l.End.Sub(resp.Now).Round(time.Minute)
-			fmt.Printf("  %s  até %s (faltam %v)  %s\n", l.ID, l.End.Local().Format("02/01 15:04"), left, strings.Join(l.Sites, ", "))
+			fmt.Printf("  %s  até %s (faltam %v)  %s\n", l.ID, l.End.Local().Format("02/01 15:04"), left, describe(l.Sites, l.Allow))
 		}
 	}
 	if len(st.Schedules) > 0 {
@@ -297,7 +323,7 @@ func cmdStatus() error {
 				name = "-"
 			}
 			fmt.Printf(" %s %s  %-12s %s %s–%s  %s", mark, s.ID, name, state.FormatDays(s.Days),
-				state.FormatHHMM(s.From), state.FormatHHMM(s.To), strings.Join(s.Sites, ", "))
+				state.FormatHHMM(s.From), state.FormatHHMM(s.To), describe(s.Sites, s.Allow))
 			if s.RemoveAfter != nil {
 				fmt.Printf("  (sai em %s)", s.RemoveAfter.Local().Format("02/01 15:04"))
 			}
@@ -315,7 +341,7 @@ func cmdStatus() error {
 			if name == "" {
 				name = "-"
 			}
-			fmt.Printf("   %s  %-12s %s", t.ID, name, strings.Join(t.Sites, ", "))
+			fmt.Printf("   %s  %-12s %s", t.ID, name, describe(t.Sites, t.Allow))
 			if t.RemoveAfter != nil {
 				fmt.Printf("  (sai em %s)", t.RemoveAfter.Local().Format("02/01 15:04"))
 			}
@@ -350,7 +376,7 @@ func cmdUninstall() error {
 		return err
 	}
 	// Remove a seção do /etc/hosts e esvazia o anchor do firewall.
-	(&enforce.Enforcer{}).Apply(nil)
+	(&enforce.Enforcer{}).Apply(nil, nil)
 	fmt.Println("Desinstalado.")
 	return nil
 }

@@ -166,3 +166,22 @@ func TestTimerValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestInternetLockWithExceptions(t *testing.T) {
+	d, hosts := newTestDaemon(t)
+	resp := d.Handle(api.Request{Cmd: api.CmdLock, Sites: []string{"internet"}, Allow: []string{"https://www.wikipedia.org/", "github.com"}, For: time.Hour})
+	if !resp.OK {
+		t.Fatal(resp.Error)
+	}
+	if len(resp.Allow) != 2 || resp.Allow[0] != "github.com" || resp.State.Locks[0].Allow[1] != "wikipedia.org" {
+		t.Fatalf("resp = %+v", resp)
+	}
+	d.tick()
+	if data, _ := os.ReadFile(hosts); strings.Contains(string(data), "wikipedia.org") {
+		t.Fatalf("exceção não pode ir para o hosts:\n%s", data)
+	}
+	// Exceções sem bloquear a internet não fazem sentido.
+	if resp := d.Handle(api.Request{Cmd: api.CmdLock, Sites: []string{"x.com"}, Allow: []string{"y.com"}, For: time.Hour}); resp.OK {
+		t.Fatal("deveria falhar")
+	}
+}

@@ -152,3 +152,50 @@ func TestParseDays(t *testing.T) {
 		t.Error("deveria falhar")
 	}
 }
+
+func TestActiveAllow(t *testing.T) {
+	now := at(5, 10, 0)
+	lock := func(id string, sites, allow []string) Lock {
+		return Lock{ID: id, Sites: sites, Allow: allow, Start: now, End: now.Add(time.Hour)}
+	}
+	st := &State{Locks: []Lock{lock("a", []string{"*"}, []string{"github.com", "wikipedia.org", "x.com"})}}
+	if got := st.ActiveAllow(now); !reflect.DeepEqual(got, []string{"github.com", "wikipedia.org", "x.com"}) {
+		t.Fatalf("allow = %v", got)
+	}
+	// Um site bloqueado por outra regra nunca é exceção.
+	st.Locks = append(st.Locks, lock("b", []string{"x.com"}, nil))
+	// Dois bloqueios da internet: só passa o que ambos permitem.
+	st.Locks = append(st.Locks, lock("c", []string{"*"}, []string{"wikipedia.org", "x.com"}))
+	if got := st.ActiveAllow(now); !reflect.DeepEqual(got, []string{"wikipedia.org"}) {
+		t.Fatalf("allow = %v", got)
+	}
+	// Sem bloqueio da internet não há exceções.
+	if got := (&State{Locks: []Lock{lock("b", []string{"x.com"}, nil)}}).ActiveAllow(now); len(got) != 0 {
+		t.Fatalf("allow = %v", got)
+	}
+	// Bloqueio da internet sem exceções anula as de outro.
+	st = &State{Locks: []Lock{lock("a", []string{"*"}, []string{"github.com"}), lock("c", []string{"*"}, nil)}}
+	if got := st.ActiveAllow(now); len(got) != 0 {
+		t.Fatalf("allow = %v", got)
+	}
+}
+
+func TestMergeCannotAddExceptions(t *testing.T) {
+	now := at(5, 10, 0)
+	l := Lock{ID: "l", Sites: []string{"*"}, Allow: []string{"github.com"}, Start: now, End: now.Add(time.Hour)}
+	forged := l
+	forged.Allow = []string{"github.com", "youtube.com"}
+	sc := workday()
+	sc.Sites, sc.Allow = []string{"*"}, nil
+	scForged := sc
+	scForged.Allow = []string{"youtube.com"}
+	tm := twoPeriods()
+	tm.Sites = []string{"*"}
+	tmForged := tm
+	tmForged.Allow = []string{"youtube.com"}
+	got := Merge(&State{Locks: []Lock{forged}, Schedules: []Schedule{scForged}, Timers: []Timer{tmForged}},
+		&State{Locks: []Lock{l}, Schedules: []Schedule{sc}, Timers: []Timer{tm}})
+	if !reflect.DeepEqual(got.Locks[0].Allow, []string{"github.com"}) || len(got.Schedules[0].Allow) != 0 || len(got.Timers[0].Allow) != 0 {
+		t.Fatalf("exceção forjada prevaleceu: %+v %+v %+v", got.Locks[0].Allow, got.Schedules[0].Allow, got.Timers[0].Allow)
+	}
+}

@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/pedroivy/focolock/internal/sites"
 )
 
 // RemovalDelay é quanto tempo um agendamento continua valendo depois de você
@@ -19,6 +21,7 @@ const RemovalDelay = 24 * time.Hour
 type Lock struct {
 	ID    string    `json:"id"`
 	Sites []string  `json:"sites"`
+	Allow []string  `json:"allow,omitempty"` // com "*": sites que continuam acessíveis
 	Start time.Time `json:"start"`
 	End   time.Time `json:"end"`
 }
@@ -28,6 +31,7 @@ type Schedule struct {
 	ID      string         `json:"id"`
 	Name    string         `json:"name"`
 	Sites   []string       `json:"sites"`
+	Allow   []string       `json:"allow,omitempty"` // com "*": sites que continuam acessíveis
 	Days    []time.Weekday `json:"days"`
 	From    int            `json:"from"` // minutos desde 00:00
 	To      int            `json:"to"`   // minutos desde 00:00; To <= From atravessa a meia-noite
@@ -111,35 +115,93 @@ func (l Lock) Active(now time.Time) bool {
 	return !now.Before(l.Start) && now.Before(l.End)
 }
 
-// ActiveSites devolve a união dos sites de tudo que está ativo agora.
-func (st *State) ActiveSites(now time.Time) []string {
-	set := map[string]bool{}
+// active devolve (sites, exceções) de cada coisa que está a bloquear agora.
+func (st *State) active(now time.Time) (lists, allows [][]string) {
 	for _, l := range st.Locks {
 		if l.Active(now) {
-			for _, s := range l.Sites {
-				set[s] = true
-			}
+			lists, allows = append(lists, l.Sites), append(allows, l.Allow)
 		}
 	}
 	for _, sc := range st.Schedules {
 		if sc.Active(now) {
-			for _, s := range sc.Sites {
-				set[s] = true
-			}
+			lists, allows = append(lists, sc.Sites), append(allows, sc.Allow)
 		}
 	}
 	for _, t := range st.Timers {
 		if t.Blocking(now) {
-			for _, s := range t.Sites {
-				set[s] = true
-			}
+			lists, allows = append(lists, t.Sites), append(allows, t.Allow)
 		}
 	}
+	return lists, allows
+}
+
+// ActiveSites devolve a união dos sites de tudo que está ativo agora.
+func (st *State) ActiveSites(now time.Time) []string {
+	lists, _ := st.active(now)
+	set := map[string]bool{}
+	for _, l := range lists {
+		for _, s := range l {
+			set[s] = true
+		}
+	}
+	return sortedKeys(set)
+}
+
+// ActiveAllow devolve as exceções ao bloqueio de toda a internet. Se houver
+// vários bloqueios de internet ativos, só passa o que todos permitem; e um
+// site bloqueado explicitamente por outra regra nunca é exceção.
+func (st *State) ActiveAllow(now time.Time) []string {
+	lists, allows := st.active(now)
+	var allow map[string]bool
+	blocked := map[string]bool{}
+	for i, l := range lists {
+		if !contains(l, sites.Internet) {
+			for _, s := range l {
+				blocked[s] = true
+			}
+			continue
+		}
+		cur := map[string]bool{}
+		for _, s := range allows[i] {
+			if allow == nil || allow[s] {
+				cur[s] = true
+			}
+		}
+		allow = cur
+	}
+	for s := range blocked {
+		delete(allow, s)
+	}
+	return sortedKeys(allow)
+}
+
+func contains(list []string, s string) bool {
+	for _, x := range list {
+		if x == s {
+			return true
+		}
+	}
+	return false
+}
+
+func sortedKeys(set map[string]bool) []string {
 	out := make([]string, 0, len(set))
 	for s := range set {
 		out = append(out, s)
 	}
 	sort.Strings(out)
+	return out
+}
+
+// intersect devolve só as exceções presentes nas duas cópias: acrescentar
+// exceções editando um dos arquivos não adianta.
+func intersect(a, b []string) []string {
+	var out []string
+	for _, s := range a {
+		if contains(b, s) {
+			out = append(out, s)
+		}
+	}
 	return out
 }
 
@@ -236,9 +298,17 @@ func Merge(a, b *State) *State {
 	out := &State{}
 	locks := map[string]Lock{}
 	for _, l := range append(append([]Lock{}, a.Locks...), b.Locks...) {
-		if cur, ok := locks[l.ID]; !ok || l.End.After(cur.End) {
+		cur, ok := locks[l.ID]
+		if !ok {
 			locks[l.ID] = l
+			continue
 		}
+		allow := intersect(cur.Allow, l.Allow)
+		if l.End.After(cur.End) {
+			cur = l
+		}
+		cur.Allow = allow
+		locks[l.ID] = cur
 	}
 	for _, l := range locks {
 		out.Locks = append(out.Locks, l)
@@ -252,10 +322,13 @@ func Merge(a, b *State) *State {
 			scheds[s.ID] = s
 			continue
 		}
+		allow := intersect(cur.Allow, s.Allow)
 		// Prevalece o pedido de remoção mais tardio (ou nenhum).
 		if cur.RemoveAfter != nil && (s.RemoveAfter == nil || s.RemoveAfter.After(*cur.RemoveAfter)) {
-			scheds[s.ID] = s
+			cur = s
 		}
+		cur.Allow = allow
+		scheds[s.ID] = cur
 	}
 	for _, s := range scheds {
 		out.Schedules = append(out.Schedules, s)

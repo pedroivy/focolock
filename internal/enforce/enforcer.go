@@ -16,6 +16,10 @@ const HostsPath = "/etc/hosts"
 // IPRefresh: com que frequência re-resolvemos os IPs dos sites (CDNs mudam).
 const IPRefresh = 10 * time.Minute
 
+// AllowRefresh: as exceções ao bloqueio da internet são re-resolvidas mais
+// vezes, porque um IP que mudou deixa o site permitido inacessível.
+const AllowRefresh = 2 * time.Minute
+
 // Enforcer mantém o sistema de acordo com a lista de domínios ativos.
 // Apply é chamado a cada poucos segundos: se alguém editar o /etc/hosts ou
 // limpar o firewall, o bloqueio volta no próximo ciclo.
@@ -24,15 +28,24 @@ type Enforcer struct {
 	HostsFile string // padrão: /etc/hosts
 
 	lastDomains []string
+	lastAllow   []string
 	lastPF      string
 	ips         []string
 	ipsAt       time.Time
+	allowIPs    []string
+	allowAt     time.Time
 }
 
-func (e *Enforcer) Apply(domains []string) {
+// Apply bloqueia domains. Se domains contiver sites.Internet, allow são os
+// sites que continuam acessíveis.
+func (e *Enforcer) Apply(domains, allow []string) {
 	changed := !slices.Equal(domains, e.lastDomains)
 	blockAll := slices.Contains(domains, sites.Internet)
 	wasBlockingAll := slices.Contains(e.lastDomains, sites.Internet)
+	if !blockAll {
+		allow = nil
+	}
+	allowChanged := !slices.Equal(allow, e.lastAllow)
 	var hosts []string
 	if len(domains) > 0 {
 		hosts = append(sites.Expand(domains), sites.DoHHosts...)
@@ -52,24 +65,31 @@ func (e *Enforcer) Apply(domains []string) {
 			ips = e.ips
 		}
 	}
-	rules := RenderPF(ips, doh, blockAll)
+	var allowIPs []string
+	if len(allow) > 0 && e.BlockIPs {
+		if allowChanged || time.Since(e.allowAt) > AllowRefresh {
+			e.allowIPs, e.allowAt = ResolveAllowIPs(sites.Expand(allow)), time.Now()
+		}
+		allowIPs = e.allowIPs
+	}
+	rules := RenderPF(ips, doh, blockAll, allowIPs)
 	if rules != e.lastPF || !pfIntact(len(domains) > 0) {
 		if err := loadPF(rules, len(domains) > 0); err != nil {
 			log.Printf("pf: %v", err)
 		} else {
 			e.lastPF = rules
 			// Conexões já abertas (HTTP/2, websockets) sobreviveriam ao bloqueio.
-			if blockAll && !wasBlockingAll {
+			if blockAll && (!wasBlockingAll || allowChanged) {
 				killAllStates()
 			} else {
 				killStates(ips)
 			}
 		}
 	}
-	if changed {
-		log.Printf("sites bloqueados agora: %v", domains)
+	if changed || allowChanged {
+		log.Printf("sites bloqueados agora: %v (exceções: %v)", domains, allow)
 	}
-	e.lastDomains = domains
+	e.lastDomains, e.lastAllow = domains, allow
 }
 
 // writeHosts reescreve o /etc/hosts só se o conteúdo divergir. Retorna true se escreveu.

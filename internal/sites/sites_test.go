@@ -44,3 +44,19 @@ func TestExpand(t *testing.T) {
 		t.Fatalf("got %v", got)
 	}
 }
+
+func TestNormalizeAllow(t *testing.T) {
+	got, err := NormalizeAllow([]string{Internet}, []string{"https://www.Wikipedia.org/wiki/x", "apple.com", "wikipedia.org", "github.com"})
+	if err != nil || len(got) != 2 || got[0] != "github.com" || got[1] != "wikipedia.org" {
+		t.Fatalf("got %v, %v", got, err)
+	}
+	if got, err := NormalizeAllow([]string{Internet}, nil); err != nil || got != nil {
+		t.Fatalf("lista vazia: %v, %v", got, err)
+	}
+	if _, err := NormalizeAllow([]string{"x.com"}, []string{"y.com"}); err == nil {
+		t.Error("exceções sem bloqueio da internet deveriam falhar")
+	}
+	if _, err := NormalizeAllow([]string{Internet}, []string{"internet"}); err == nil {
+		t.Error("a internet não pode ser exceção")
+	}
+}

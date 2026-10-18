@@ -72,6 +72,41 @@ func NormalizeAll(raw []string) ([]string, error) {
 	return out, nil
 }
 
+// NormalizeAllow normaliza as exceções ao bloqueio de toda a internet. Só faz
+// sentido se sites contiver Internet; a lista pode ser vazia.
+func NormalizeAllow(sites, raw []string) ([]string, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	internet := false
+	for _, s := range sites {
+		internet = internet || s == Internet
+	}
+	if !internet {
+		return nil, fmt.Errorf("exceções só existem no bloqueio de toda a internet")
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, r := range raw {
+		h, err := Normalize(r)
+		if err != nil && !strings.Contains(err.Error(), "não pode ser bloqueado") {
+			return nil, err
+		}
+		if h == Internet {
+			return nil, fmt.Errorf("a exceção não pode ser toda a internet")
+		}
+		if h == "" || forbidden[h] {
+			continue // nunca são bloqueados, não precisam de exceção
+		}
+		if !seen[h] {
+			seen[h] = true
+			out = append(out, h)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
 // O /etc/hosts não aceita curingas, então cobrimos os subdomínios mais comuns.
 var commonSubdomains = []string{"", "www.", "m.", "mobile.", "web.", "app.", "api."}
 

@@ -14,6 +14,7 @@ Também pelo Terminal:
 ```sh
 focolock bloquear --por 2h youtube.com x.com
 focolock bloquear --ate 18:00 instagram.com
+focolock bloquear --por 2h --exceto wikipedia.org,github.com internet   # toda a internet, menos estes
 focolock agendar --dias seg-sex --das 09:00 --ate 18:00 --nome trabalho youtube.com reddit.com
 focolock agendar --dias todos --das 23:00 --ate 07:00 --nome sono x.com    # atravessa a meia-noite
 focolock temporizador --periodos 06:00-12:00=10,18:00-23:59=10 --nome redes instagram.com
@@ -21,6 +22,15 @@ focolock usar <id> 1           # gasta os 10 min do 1.º período (uma vez por d
 focolock status
 focolock remover <id>          # só vale daqui a 24h, e nunca no meio de uma janela ativa
 ```
+
+**Toda a internet, com exceções:** na app escolha "Toda a internet" em vez de
+"Sites" e adicione os sites que devem continuar a funcionar (no Terminal,
+`internet` com `--exceto`). Vale para bloqueios, horários fixos e
+temporizadores. Só passa o tráfego para os IPs desses sites (re-resolvidos a
+cada 2 min) e o DNS comum; o resto fica cortado. Um site que carrega conteúdo
+de outros domínios (ex.: YouTube usa `googlevideo.com` e `ytimg.com`) precisa
+deles também na lista. Se dois bloqueios de internet estiverem ativos ao
+mesmo tempo, só passa o que os dois permitem.
 
 **Temporizador:** os sites ficam sempre bloqueados. Em cada período do dia
 pode desbloqueá-los uma única vez, durante os minutos definidos; depois voltam

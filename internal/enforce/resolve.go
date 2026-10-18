@@ -5,7 +5,9 @@ import (
 	"math/rand/v2"
 	"net"
 	"net/netip"
+	"os"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,6 +22,45 @@ var DNSServers = []string{"1.1.1.1:53", "8.8.8.8:53", "9.9.9.9:53"}
 // ResolveIPs resolve os hostnames em paralelo e devolve IPs únicos e ordenados.
 // Falhas individuais são ignoradas (o /etc/hosts continua bloqueando o nome).
 func ResolveIPs(hosts []string) []string {
+	return resolve(hosts, func(h string, t dnsmessage.Type) ([]netip.Addr, error) { return queryAny(h, t) })
+}
+
+// ResolveAllowIPs resolve as exceções ao bloqueio da internet perguntando a
+// todos os servidores, incluindo o DNS do sistema: CDNs respondem IPs
+// diferentes conforme quem pergunta, e o navegador vai usar o do sistema.
+func ResolveAllowIPs(hosts []string) []string {
+	servers := append(systemDNS(), DNSServers...)
+	return resolve(hosts, func(h string, t dnsmessage.Type) ([]netip.Addr, error) {
+		var all []netip.Addr
+		for _, srv := range servers {
+			if ips, err := query(srv, h, t); err == nil {
+				all = append(all, ips...)
+			}
+		}
+		return all, nil
+	})
+}
+
+// systemDNS lê os servidores do /etc/resolv.conf (o macOS mantém-no em dia).
+func systemDNS() []string {
+	data, err := os.ReadFile("/etc/resolv.conf")
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, line := range strings.Split(string(data), "\n") {
+		f := strings.Fields(line)
+		if len(f) < 2 || f[0] != "nameserver" {
+			continue
+		}
+		if ip, err := netip.ParseAddr(f[1]); err == nil && !ip.IsLoopback() {
+			out = append(out, netip.AddrPortFrom(ip.WithZone(""), 53).String())
+		}
+	}
+	return out
+}
+
+func resolve(hosts []string, lookup func(string, dnsmessage.Type) ([]netip.Addr, error)) []string {
 	var mu sync.Mutex
 	set := map[string]bool{}
 	sem := make(chan struct{}, 16)
@@ -31,7 +72,7 @@ func ResolveIPs(hosts []string) []string {
 				defer wg.Done()
 				sem <- struct{}{}
 				defer func() { <-sem }()
-				ips, err := queryAny(h, t)
+				ips, err := lookup(h, t)
 				if err != nil {
 					return
 				}
