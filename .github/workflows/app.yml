@@ -29,27 +29,31 @@ jobs:
 
       - name: Serviço (Go, universal)
         run: |
-          mkdir -p build
-          GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o build/focolock-arm64 ./cmd/focolock
-          GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o build/focolock-amd64 ./cmd/focolock
-          lipo -create -output build/focolock build/focolock-arm64 build/focolock-amd64
+          # Pastas separadas: o disco do Mac não distingue "focolock" de "Focolock".
+          mkdir -p build/svc
+          GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o build/svc/focolock-arm64 ./cmd/focolock
+          GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o build/svc/focolock-amd64 ./cmd/focolock
+          lipo -create -output build/svc/focolock build/svc/focolock-arm64 build/svc/focolock-amd64
 
       - name: App (SwiftUI, universal)
         run: |
+          mkdir -p build/gui
           SDK=$(xcrun --sdk macosx --show-sdk-path)
           for arch in arm64 x86_64; do
             xcrun swiftc -O -swift-version 5 -parse-as-library -sdk "$SDK" \
-              -target "$arch-apple-macos13.0" app/*.swift -o "build/Focolock-$arch"
+              -target "$arch-apple-macos13.0" app/*.swift -o "build/gui/Focolock-$arch"
           done
-          lipo -create -output build/Focolock build/Focolock-arm64 build/Focolock-x86_64
+          lipo -create -output build/gui/Focolock build/gui/Focolock-arm64 build/gui/Focolock-x86_64
 
       - name: Montar Focolock.app
         run: |
           C=build/Focolock.app/Contents
           mkdir -p "$C/MacOS" "$C/Resources"
           cp app/Info.plist "$C/"
-          cp build/Focolock "$C/MacOS/"
-          cp build/focolock "$C/Resources/"
+          cp build/gui/Focolock "$C/MacOS/Focolock"
+          cp build/svc/focolock "$C/Resources/focolock"
+          # Confere que o serviço é o binário Go (tem o subcomando "daemon").
+          grep -q "focolock instalar" "$C/Resources/focolock"
           cp internal/guard/assets/Focolock.icns "$C/Resources/"
           codesign --force --deep --sign - build/Focolock.app
           codesign --verify --deep --strict build/Focolock.app
@@ -60,7 +64,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete app-latest --yes --cleanup-tag || true
-          gh release create app-latest build/Focolock.zip build/focolock \
+          gh release create app-latest build/Focolock.zip build/svc/focolock \
             --title "Focolock (última versão)" \
             --notes "Gerado automaticamente a partir de ${GITHUB_SHA}." \
             --target "$GITHUB_SHA"
