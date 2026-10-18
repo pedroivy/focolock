@@ -35,7 +35,10 @@ mesmo tempo, só passa o que os dois permitem.
 **Temporizador:** os sites ficam sempre bloqueados. Em cada período do dia
 pode desbloqueá-los uma única vez, durante os minutos definidos; depois voltam
 a bloquear sozinhos. Não dá para pausar nem repetir, e conta a hora confiável
-do serviço, por isso mudar a hora do Mac não dá minutos extra.
+do serviço, por isso mudar a hora do Mac não dá minutos extra. A pausa também
+abre esses sites por cima de um bloqueio de toda a internet (ex.: horário que
+bloqueia a internet das 09:00 às 18:00 + temporizador do YouTube com 10 min);
+um site bloqueado um a um por outra regra continua bloqueado.
 
 Não existe comando para cancelar ou encurtar um bloqueio. Esse é o ponto.
 

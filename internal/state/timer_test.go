@@ -166,3 +166,61 @@ func TestValidatePeriods(t *testing.T) {
 		}
 	}
 }
+
+func TestTimerPauseOpensInternetBlock(t *testing.T) {
+	// Horário: toda a internet das 09:00 às 18:00, exceto github.com.
+	sc := workday()
+	sc.Sites, sc.Allow = []string{"*"}, []string{"github.com"}
+	tm := twoPeriods() // x.com, com pausa de 10 min de manhã
+	st := &State{Schedules: []Schedule{sc}, Timers: []Timer{tm}}
+
+	now := at(5, 10, 0)
+	if got := st.ActiveAllow(now); !reflect.DeepEqual(got, []string{"github.com"}) {
+		t.Fatalf("antes da pausa: allow = %v", got)
+	}
+	if _, err := st.UseTimer("t", 0, now); err != nil {
+		t.Fatal(err)
+	}
+	during := now.Add(5 * time.Minute)
+	if got := st.ActiveAllow(during); !reflect.DeepEqual(got, []string{"github.com", "x.com"}) {
+		t.Fatalf("durante a pausa: allow = %v", got)
+	}
+	if got := st.ActiveSites(during); !reflect.DeepEqual(got, []string{"*"}) {
+		t.Fatalf("durante a pausa: active = %v", got)
+	}
+	if got := st.ActiveAllow(now.Add(10 * time.Minute)); !reflect.DeepEqual(got, []string{"github.com"}) {
+		t.Fatalf("depois da pausa: allow = %v", got)
+	}
+
+	// Um site bloqueado um a um por outra regra continua bloqueado.
+	st.Locks = []Lock{{ID: "l", Sites: []string{"x.com"}, Start: now, End: now.Add(time.Hour)}}
+	if got := st.ActiveAllow(during); !reflect.DeepEqual(got, []string{"github.com"}) {
+		t.Fatalf("com bloqueio explícito: allow = %v", got)
+	}
+
+	// Fora de um bloqueio da internet a pausa não cria exceções.
+	st = &State{Timers: []Timer{twoPeriods()}}
+	_, _ = st.UseTimer("t", 0, now)
+	if got := st.ActiveAllow(during); got != nil {
+		t.Fatalf("sem bloqueio da internet: allow = %v", got)
+	}
+}
+
+func TestInternetTimerPauseLiftsInternetBlock(t *testing.T) {
+	sc := workday()
+	sc.Sites = []string{"*"}
+	tm := twoPeriods()
+	tm.Sites = []string{"*"}
+	block := Lock{ID: "l", Sites: []string{"y.com"}, Start: at(5, 0, 0), End: at(6, 0, 0)}
+	st := &State{Schedules: []Schedule{sc}, Timers: []Timer{tm}, Locks: []Lock{block}}
+	now := at(5, 10, 0)
+	if _, err := st.UseTimer("t", 0, now); err != nil {
+		t.Fatal(err)
+	}
+	if got := st.ActiveSites(now.Add(time.Minute)); !reflect.DeepEqual(got, []string{"y.com"}) {
+		t.Fatalf("active = %v", got)
+	}
+	if got := st.ActiveSites(now.Add(10 * time.Minute)); !reflect.DeepEqual(got, []string{"*", "y.com"}) {
+		t.Fatalf("depois da pausa: active = %v", got)
+	}
+}

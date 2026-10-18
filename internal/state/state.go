@@ -136,6 +136,11 @@ func (st *State) active(now time.Time) (lists, allows [][]string) {
 }
 
 // ActiveSites devolve a união dos sites de tudo que está ativo agora.
+//
+// Uma pausa de temporizador a decorrer abre os sites desse temporizador
+// também por cima do bloqueio de toda a internet (ver ActiveAllow). Se o
+// temporizador for da própria internet, a pausa levanta o bloqueio da
+// internet; sites bloqueados um a um continuam bloqueados.
 func (st *State) ActiveSites(now time.Time) []string {
 	lists, _ := st.active(now)
 	set := map[string]bool{}
@@ -144,21 +149,27 @@ func (st *State) ActiveSites(now time.Time) []string {
 			set[s] = true
 		}
 	}
+	if st.pausedSites(now)[sites.Internet] {
+		delete(set, sites.Internet)
+	}
 	return sortedKeys(set)
 }
 
 // ActiveAllow devolve as exceções ao bloqueio de toda a internet. Se houver
-// vários bloqueios de internet ativos, só passa o que todos permitem; e um
-// site bloqueado explicitamente por outra regra nunca é exceção.
+// vários bloqueios de internet ativos, só passa o que todos permitem. Os
+// sites de um temporizador em pausa também passam. Um site bloqueado
+// explicitamente por outra regra nunca é exceção.
 func (st *State) ActiveAllow(now time.Time) []string {
 	lists, allows := st.active(now)
 	var allow map[string]bool
 	blocked := map[string]bool{}
 	for i, l := range lists {
-		if !contains(l, sites.Internet) {
-			for _, s := range l {
+		for _, s := range l {
+			if s != sites.Internet {
 				blocked[s] = true
 			}
+		}
+		if !contains(l, sites.Internet) {
 			continue
 		}
 		cur := map[string]bool{}
@@ -169,10 +180,31 @@ func (st *State) ActiveAllow(now time.Time) []string {
 		}
 		allow = cur
 	}
+	if allow == nil {
+		return nil // sem bloqueio da internet não há exceções
+	}
+	for s := range st.pausedSites(now) {
+		if s != sites.Internet {
+			allow[s] = true
+		}
+	}
 	for s := range blocked {
 		delete(allow, s)
 	}
 	return sortedKeys(allow)
+}
+
+// pausedSites: sites dos temporizadores com uma pausa a decorrer agora.
+func (st *State) pausedSites(now time.Time) map[string]bool {
+	out := map[string]bool{}
+	for _, t := range st.Timers {
+		if !t.Removed(now) && t.Unlocked(now) {
+			for _, s := range t.Sites {
+				out[s] = true
+			}
+		}
+	}
+	return out
 }
 
 func contains(list []string, s string) bool {

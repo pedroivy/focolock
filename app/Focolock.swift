@@ -1100,7 +1100,7 @@ struct NewTimerView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Novo temporizador").font(.title2.weight(.bold))
-            Text("Os sites ficam sempre bloqueados. Em cada período pode desbloqueá-los uma vez por dia, durante os minutos escolhidos.")
+            Text("Os sites ficam sempre bloqueados. Em cada período pode desbloqueá-los uma vez por dia, durante os minutos escolhidos — mesmo que a internet esteja bloqueada nessa altura.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
             SiteInput(sites: $sites, allow: $allow)
