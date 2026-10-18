@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/pedroivy/focolock/internal/api"
@@ -29,6 +30,9 @@ func (d *Daemon) serveWeb() {
 	_, _ = rand.Read(tok)
 	token := hex.EncodeToString(tok)
 	page := bytes.Replace(indexHTML, []byte("__FOCOLOCK_TOKEN__"), []byte(token), 1)
+	if err := os.WriteFile(api.TokenPath, []byte(token), 0o644); err != nil {
+		log.Printf("web: gravar token: %v", err)
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {

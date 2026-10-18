@@ -52,6 +52,10 @@ const appPlist = `<?xml version="1.0" encoding="UTF-8"?>
 
 func installApp() error {
 	c := filepath.Join(AppPath, "Contents")
+	// A app nativa (que traz o serviço em Resources) não deve ser trocada pelo atalho.
+	if _, err := os.Stat(filepath.Join(c, "Resources", "focolock")); err == nil {
+		return nil
+	}
 	files := []struct {
 		path string
 		data []byte

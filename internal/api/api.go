@@ -15,6 +15,11 @@ import (
 
 const SocketPath = "/var/run/focolock.sock"
 
+// TokenPath guarda o token da API web local. A app nativa lê daqui; sites
+// abertos no navegador não conseguem ler ficheiros, então não conseguem
+// criar bloqueios em seu nome.
+const TokenPath = "/var/run/focolock.token"
+
 const (
 	CmdStatus         = "status"
 	CmdLock           = "lock"
