@@ -103,10 +103,12 @@ func Install() error {
 			_, _ = launchctl("bootout", "system/"+label)
 		}
 	}
-	if err := copyFile(self, BinPath, 0o755); err != nil {
+	// Backup primeiro: o guard de um serviço antigo ainda vivo usa o backup
+	// como referência e "restauraria" o binário velho.
+	if err := copyFile(self, BackupBin, 0o700); err != nil {
 		return err
 	}
-	if err := copyFile(self, BackupBin, 0o700); err != nil {
+	if err := copyFile(self, BinPath, 0o755); err != nil {
 		return err
 	}
 	_ = os.Remove(LinkPath)
@@ -114,6 +116,10 @@ func Install() error {
 		return err
 	}
 	Ensure()
+	// Se um serviço sobreviveu ao bootout (o outro o religou), reinicia com o binário novo.
+	for label := range Services {
+		_, _ = launchctl("kickstart", "-k", "system/"+label)
+	}
 	return nil
 }
 
