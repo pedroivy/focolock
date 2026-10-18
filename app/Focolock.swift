@@ -105,12 +105,13 @@ final class Model: ObservableObject {
     private var clockOffset: TimeInterval = 0
     var now: Date { Date().addingTimeInterval(clockOffset) }
 
-    private var timer: Timer?
-
     init() {
-        Task { await refresh() }
-        timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
-            Task { @MainActor in await self?.refresh() }
+        // Atualiza o estado a cada 5 segundos enquanto a app estiver aberta.
+        Task {
+            while true {
+                await refresh()
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+            }
         }
     }
 
