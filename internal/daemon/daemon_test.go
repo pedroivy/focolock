@@ -94,3 +94,19 @@ func TestScheduleAddAndRemove(t *testing.T) {
 		t.Fatalf("resp = %+v", resp)
 	}
 }
+
+func TestInternetLock(t *testing.T) {
+	d, hosts := newTestDaemon(t)
+	resp := d.Handle(api.Request{Cmd: api.CmdLock, Sites: []string{"internet", "x.com"}, For: time.Hour})
+	if !resp.OK {
+		t.Fatal(resp.Error)
+	}
+	if len(resp.Active) != 2 || resp.Active[0] != "*" {
+		t.Fatalf("active = %v", resp.Active)
+	}
+	d.tick()
+	data, _ := os.ReadFile(hosts)
+	if strings.Contains(string(data), "0.0.0.0 *") || !strings.Contains(string(data), "0.0.0.0 x.com") {
+		t.Fatalf("hosts:\n%s", data)
+	}
+}

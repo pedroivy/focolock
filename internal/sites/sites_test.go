@@ -12,6 +12,8 @@ func TestNormalize(t *testing.T) {
 		"  x.com  ":                         "x.com",
 		"*.reddit.com":                      "reddit.com",
 		"news.ycombinator.com:443":          "news.ycombinator.com",
+		"Internet":                          Internet,
+		"*":                                 Internet,
 	}
 	for in, want := range cases {
 		got, err := Normalize(in)
@@ -37,7 +39,7 @@ func TestNormalizeAllDedup(t *testing.T) {
 }
 
 func TestExpand(t *testing.T) {
-	got := Expand([]string{"x.com"})
+	got := Expand([]string{"x.com", Internet})
 	if len(got) != len(commonSubdomains) || got[0] != "api.x.com" {
 		t.Fatalf("got %v", got)
 	}

@@ -61,3 +61,7 @@ func killStates(ips []string) {
 		_, _ = run("/sbin/pfctl", "-k", any, "-k", ip)
 	}
 }
+
+func killAllStates() {
+	_, _ = run("/sbin/pfctl", "-F", "states")
+}

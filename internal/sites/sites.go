@@ -19,11 +19,18 @@ var forbidden = map[string]bool{
 	"pool.ntp.org": true,
 }
 
+// Internet é o "site" especial que bloqueia toda a ligação à internet.
+const Internet = "*"
+
 // Normalize aceita "https://www.YouTube.com/watch?v=1" e devolve "youtube.com".
+// "internet" ou "*" viram Internet.
 func Normalize(raw string) (string, error) {
 	s := strings.TrimSpace(strings.ToLower(raw))
 	if s == "" {
 		return "", fmt.Errorf("site vazio")
+	}
+	if s == Internet || s == "internet" || s == "toda a internet" {
+		return Internet, nil
 	}
 	if !strings.Contains(s, "://") {
 		s = "http://" + s
@@ -73,6 +80,9 @@ func Expand(domains []string) []string {
 	seen := map[string]bool{}
 	var out []string
 	for _, d := range domains {
+		if d == Internet {
+			continue
+		}
 		for _, p := range commonSubdomains {
 			h := p + d
 			if !seen[h] {

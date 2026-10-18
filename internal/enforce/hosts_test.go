@@ -31,13 +31,18 @@ func TestRenderHostsNoTrailingNewline(t *testing.T) {
 }
 
 func TestRenderPF(t *testing.T) {
-	got := RenderPF([]string{"1.2.3.4"}, []string{"8.8.8.8"})
+	got := RenderPF([]string{"1.2.3.4"}, []string{"8.8.8.8"}, false)
 	for _, want := range []string{"<focolock_sites> const { 1.2.3.4 }", "to <focolock_doh> port 443"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("faltou %q em:\n%s", want, got)
 		}
 	}
-	if strings.Contains(RenderPF(nil, nil), "block") {
+	if strings.Contains(RenderPF(nil, nil, false), "block") {
 		t.Error("sem sites não deveria haver regras")
+	}
+	all := RenderPF([]string{"1.2.3.4"}, []string{"8.8.8.8"}, true)
+	// O loopback tem de passar antes do bloqueio total, senão a app perde o serviço.
+	if i, j := strings.Index(all, "pass out quick on lo0"), strings.Index(all, "block drop out quick all"); i < 0 || j < 0 || i > j {
+		t.Errorf("regras de internet erradas:\n%s", all)
 	}
 }

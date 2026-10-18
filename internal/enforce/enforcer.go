@@ -31,6 +31,8 @@ type Enforcer struct {
 
 func (e *Enforcer) Apply(domains []string) {
 	changed := !slices.Equal(domains, e.lastDomains)
+	blockAll := slices.Contains(domains, sites.Internet)
+	wasBlockingAll := slices.Contains(e.lastDomains, sites.Internet)
 	var hosts []string
 	if len(domains) > 0 {
 		hosts = append(sites.Expand(domains), sites.DoHHosts...)
@@ -50,14 +52,18 @@ func (e *Enforcer) Apply(domains []string) {
 			ips = e.ips
 		}
 	}
-	rules := RenderPF(ips, doh)
+	rules := RenderPF(ips, doh, blockAll)
 	if rules != e.lastPF || !pfIntact(len(domains) > 0) {
 		if err := loadPF(rules, len(domains) > 0); err != nil {
 			log.Printf("pf: %v", err)
 		} else {
 			e.lastPF = rules
 			// Conexões já abertas (HTTP/2, websockets) sobreviveriam ao bloqueio.
-			killStates(ips)
+			if blockAll && !wasBlockingAll {
+				killAllStates()
+			} else {
+				killStates(ips)
+			}
 		}
 	}
 	if changed {

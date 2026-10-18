@@ -218,10 +218,17 @@ final class Model: ObservableObject {
 
 let dayNames = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"]
 
+/// O "site" especial que bloqueia toda a internet.
+let internet = "*"
+
+func siteLabel(_ s: String) -> String { s == internet ? "Toda a internet" : s }
+func sitesLabel(_ list: [String]) -> String { list.map(siteLabel).joined(separator: ", ") }
+
 /// "https://www.YouTube.com/watch?v=1" -> "youtube.com"
 func normalizeSite(_ raw: String) -> String? {
     var s = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     if s.isEmpty { return nil }
+    if s == internet || s == "internet" { return internet }
     if s.hasPrefix("*.") { s.removeFirst(2) }
     if !s.contains("://") { s = "http://" + s }
     guard var h = URL(string: s)?.host else { return nil }
@@ -333,7 +340,8 @@ struct Chip: View {
     var body: some View {
         HStack(spacing: 5) {
             if onAdd != nil { Image(systemName: "plus").font(.caption2.weight(.bold)) }
-            Text(text).font(.callout.weight(.medium))
+            if text == internet { Image(systemName: "globe").font(.caption.weight(.bold)) }
+            Text(siteLabel(text)).font(.callout.weight(.medium))
             if let onRemove {
                 Button(action: onRemove) { Image(systemName: "xmark").font(.caption2.weight(.bold)) }
                     .buttonStyle(.plain)
@@ -378,6 +386,14 @@ struct SiteInput: View {
             }
             if let invalid {
                 Text("\"\(invalid)\" não parece um site").font(.caption).foregroundStyle(.red)
+            }
+            if !sites.contains(internet) {
+                Button {
+                    sites.insert(internet, at: 0)
+                } label: {
+                    Label("Bloquear toda a internet", systemImage: "globe")
+                }
+                .buttonStyle(.link)
             }
             if !sites.isEmpty {
                 FlowLayout {
@@ -470,8 +486,9 @@ struct Header: View {
             AppIcon(size: 38)
             Text("Focolock").font(.title.weight(.bold))
             Spacer()
-            let n = model.resp?.active?.count ?? 0
-            Text(n == 0 ? "Nada bloqueado" : (n == 1 ? "1 site bloqueado" : "\(n) sites bloqueados"))
+            let active = model.resp?.active ?? []
+            let n = active.count
+            Text(active.contains(internet) ? "Internet bloqueada" : (n == 0 ? "Nada bloqueado" : (n == 1 ? "1 site bloqueado" : "\(n) sites bloqueados")))
                 .font(.callout.weight(n > 0 ? .semibold : .regular))
                 .padding(.horizontal, 11)
                 .padding(.vertical, 5)
@@ -542,7 +559,7 @@ struct LockCard: View {
     private var buttonTitle: String {
         switch sites.count {
         case 0: return "Bloquear"
-        case 1: return "Bloquear \(sites[0])"
+        case 1: return sites[0] == internet ? "Bloquear toda a internet" : "Bloquear \(sites[0])"
         default: return "Bloquear \(sites.count) sites"
         }
     }
@@ -608,11 +625,13 @@ struct LockCard: View {
             .tint(.red)
             .controlSize(.large)
             .disabled(sites.isEmpty || busy || (choice == .custom && customValue < 1))
-            .alert("Bloquear \(sites.joined(separator: ", "))?", isPresented: $confirming) {
+            .alert("Bloquear \(sitesLabel(sites))?", isPresented: $confirming) {
                 Button("Voltar", role: .cancel) {}
                 Button("Bloquear", role: .destructive) { Task { await doLock() } }
             } message: {
-                Text("Fica bloqueado até \(formatEnd(endDate)).\nNão é possível cancelar depois.")
+                Text("Fica bloqueado até \(formatEnd(endDate)).\n"
+                     + (sites.contains(internet) ? "Sem internet nada funciona: email, mensagens, chamadas, atualizações.\n" : "")
+                     + "Não é possível cancelar depois.")
             }
         }
     }
@@ -648,7 +667,7 @@ struct ActiveCard: View {
                         ForEach(locks) { l in
                             Row {
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(l.sites.joined(separator: ", ")).fontWeight(.semibold)
+                                    Text(sitesLabel(l.sites)).fontWeight(.semibold)
                                     Text("até \(formatEnd(l.endDate))").font(.caption).foregroundStyle(.secondary)
                                 }
                                 Spacer()
@@ -681,7 +700,7 @@ struct SchedulesCard: View {
                         .fill(scheduleActive(s, at: model.now) ? Color.red : Color.secondary.opacity(0.3))
                         .frame(width: 9, height: 9)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text((s.name.isEmpty ? "" : s.name + " · ") + s.sites.joined(separator: ", ")).fontWeight(.semibold)
+                        Text((s.name.isEmpty ? "" : s.name + " · ") + sitesLabel(s.sites)).fontWeight(.semibold)
                         Text(meta(s)).font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
@@ -768,7 +787,7 @@ struct NewScheduleView: View {
         }
         .padding(24)
         .frame(width: 520)
-        .alert("Bloquear \(sites.joined(separator: ", "))?", isPresented: $confirming) {
+        .alert("Bloquear \(sitesLabel(sites))?", isPresented: $confirming) {
             Button("Voltar", role: .cancel) {}
             Button("Criar horário", role: .destructive) {
                 Task {

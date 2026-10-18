@@ -234,6 +234,7 @@ function toast(msg, err) {
 function normalize(raw) {
   let s = raw.trim().toLowerCase();
   if (!s) return null;
+  if (s === "*" || s === "internet") return "*";
   if (!s.includes("://")) s = "http://" + s;
   try {
     let h = new URL(s).hostname.replace(/^\*\./, "").replace(/^www\./, "").replace(/\.$/, "");
@@ -256,7 +257,7 @@ function renderChips(el, list, onChange) {
   el.replaceChildren(...list.map((s) => {
     const c = document.createElement("span");
     c.className = "chip";
-    c.textContent = s;
+    c.textContent = s === "*" ? "Toda a internet" : s;
     const x = document.createElement("button");
     x.type = "button"; x.textContent = "×"; x.title = "Tirar";
     x.onclick = () => { list.splice(list.indexOf(s), 1); onChange(); };
@@ -341,7 +342,7 @@ function render() {
     const it = document.createElement("div");
     it.className = "item";
     it.innerHTML = `<div class="what"><div class="sites"></div><div class="meta"></div></div><div class="timer"></div>`;
-    it.querySelector(".sites").textContent = l.sites.join(", ");
+    it.querySelector(".sites").textContent = l.sites.map((x) => x === "*" ? "Toda a internet" : x).join(", ");
     it.querySelector(".meta").textContent = "até " + fmtEnd(new Date(l.end));
     it.querySelector(".timer").dataset.end = l.end;
     return it;
@@ -353,7 +354,7 @@ function render() {
     it.className = "item";
     const on = active.length && s.sites.some((x) => active.includes(x)) && isScheduleActive(s);
     it.innerHTML = `<span class="dot${on ? " on" : ""}"></span><div class="what"><div class="sites"></div><div class="meta"></div></div>`;
-    it.querySelector(".sites").textContent = (s.name ? s.name + " · " : "") + s.sites.join(", ");
+    it.querySelector(".sites").textContent = (s.name ? s.name + " · " : "") + s.sites.map((x) => x === "*" ? "Toda a internet" : x).join(", ");
     const days = (s.days || []).map((d) => DAY_NAMES[d]).join(", ");
     let meta = `${days} · ${hhmm(s.from)}–${hhmm(s.to)}`;
     if (s.remove_after) meta += ` · sai ${fmtEnd(new Date(s.remove_after))}`;
