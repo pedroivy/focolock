@@ -1,0 +1,73 @@
+// Package api é o protocolo entre a CLI e o daemon: JSON por um socket Unix.
+//
+// Repare que não existe comando para cancelar ou encurtar um bloqueio — só
+// para criar. Por isso o socket pode ser aberto a qualquer usuário.
+package api
+
+import (
+	"encoding/json"
+	"fmt"
+	"net"
+	"time"
+
+	"github.com/pedroivy/focolock/internal/state"
+)
+
+const SocketPath = "/var/run/focolock.sock"
+
+const (
+	CmdStatus         = "status"
+	CmdLock           = "lock"
+	CmdScheduleAdd    = "schedule_add"
+	CmdScheduleRemove = "schedule_remove"
+)
+
+type Request struct {
+	Cmd   string   `json:"cmd"`
+	Sites []string `json:"sites,omitempty"`
+
+	// lock: duração OU horário de término "HH:MM" (próxima ocorrência, no fuso TZ).
+	For   time.Duration `json:"for,omitempty"`
+	Until string        `json:"until,omitempty"`
+
+	// schedule_add
+	Name string         `json:"name,omitempty"`
+	Days []time.Weekday `json:"days,omitempty"`
+	From string         `json:"from,omitempty"`
+	To   string         `json:"to,omitempty"`
+	TZ   string         `json:"tz,omitempty"`
+
+	// schedule_remove
+	ID string `json:"id,omitempty"`
+}
+
+type Response struct {
+	OK      bool         `json:"ok"`
+	Error   string       `json:"error,omitempty"`
+	Message string       `json:"message,omitempty"`
+	Now     time.Time    `json:"now"`
+	Active  []string     `json:"active,omitempty"`
+	Guarded bool         `json:"guarded"`
+	State   *state.State `json:"state,omitempty"`
+}
+
+// Call envia uma requisição ao daemon.
+func Call(req Request, timeout time.Duration) (*Response, error) {
+	conn, err := net.DialTimeout("unix", SocketPath, timeout)
+	if err != nil {
+		return nil, fmt.Errorf("não consegui falar com o daemon (%v). Ele está instalado? Rode: sudo focolock instalar", err)
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(timeout))
+	if err := json.NewEncoder(conn).Encode(req); err != nil {
+		return nil, err
+	}
+	var resp Response
+	if err := json.NewDecoder(conn).Decode(&resp); err != nil {
+		return nil, err
+	}
+	if !resp.OK {
+		return &resp, fmt.Errorf("%s", resp.Error)
+	}
+	return &resp, nil
+}
