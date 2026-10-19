@@ -86,3 +86,10 @@ func TestAllowDomains(t *testing.T) {
 		t.Errorf("abriu a cloudflare toda: %v", got)
 	}
 }
+
+func TestAllowDomainsCDNIsNotWidened(t *testing.T) {
+	got := AllowDomains([]string{"www.duolingo.com"})
+	if !slices.Contains(got, "duolingo.com") || !slices.Contains(got, "d35aaqx5ub95lt.cloudfront.net") || slices.Contains(got, "cloudfront.net") {
+		t.Fatalf("got %v", got)
+	}
+}

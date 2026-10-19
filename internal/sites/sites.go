@@ -139,6 +139,8 @@ var Companions = map[string][]string{
 	"openai.com":  {"chatgpt.com", "oaistatic.com", "oaiusercontent.com", "challenges.cloudflare.com"},
 	"claude.ai":   {"anthropic.com", "claudeusercontent.com", "challenges.cloudflare.com"},
 	"youtube.com": {"googlevideo.com", "ytimg.com", "ggpht.com", "youtube-nocookie.com", "gstatic.com"},
+	// cloudfront.net é um sufixo público: só este CDN do Duolingo é aberto.
+	"duolingo.com": {"d35aaqx5ub95lt.cloudfront.net"},
 }
 
 // AllowDomains devolve os domínios (cada um com todos os subdomínios) que
