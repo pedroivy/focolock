@@ -44,7 +44,7 @@ func Run() error {
 		return fmt.Errorf("o daemon precisa rodar como root")
 	}
 	st := guard.Store.Load()
-	enf := &enforce.Enforcer{BlockIPs: true, ResolverDir: enforce.DefaultResolverDir}
+	enf := &enforce.Enforcer{BlockIPs: true, ResolverDir: enforce.DefaultResolverDir, Discover: true}
 	enf.DNS = &enforce.DNSProxy{Upstream: enforce.UpstreamDNS, Allow: enf.AllowIPs}
 	d := &Daemon{
 		st:    st,

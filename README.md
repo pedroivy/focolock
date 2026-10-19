@@ -32,8 +32,13 @@ serviço passa a ser o DNS desses domínios (`/etc/resolver/<domínio>` aponta
 para `127.0.0.1:47853`) e abre no firewall cada IP que devolve. Permitir
 `app.exemplo.com` também permite `exemplo.com`, e alguns sites conhecidos
 trazem os domínios de que precisam (ex.: `chatgpt.com` abre `oaistatic.com`,
-`openai.com` e o desafio da Cloudflare). Outros sites que carreguem conteúdo
-de domínios diferentes precisam deles também na lista.
+`openai.com` e o desafio da Cloudflare). Além disso o serviço abre a página
+de cada exceção (e de novo a cada 6h), vê de onde ela carrega scripts,
+estilos e imagens e permite esses domínios também. Por essa via nunca abre
+redes sociais, vídeo ou pesquisa (YouTube, Instagram, X, Google…) nem sites
+bloqueados por outra regra; dos scripts só aproveita domínios do próprio site
+ou de CDNs. O que uma página só carrega depois de interação (ou atrás de
+login) pode escapar: nesse caso, junte o domínio à lista.
 Se dois bloqueios de internet estiverem ativos ao
 mesmo tempo, só passa o que os dois permitem.
 

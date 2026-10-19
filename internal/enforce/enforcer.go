@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"log"
 	"net/netip"
+	"net/url"
 	"os"
 	"slices"
 	"sort"
@@ -33,6 +34,10 @@ type Enforcer struct {
 	// (vazio = não escrever). DNS recebe as consultas desses domínios.
 	ResolverDir string
 	DNS         *DNSProxy
+	// Discover: abrir também os domínios de que as páginas permitidas
+	// precisam (ver Discover). Fetch substitui o download (testes).
+	Discover bool
+	Fetch    func(u *url.URL) (string, error)
 
 	lastDomains []string
 	lastAllow   []string
@@ -43,7 +48,49 @@ type Enforcer struct {
 	allowAt     time.Time
 
 	dynMu  sync.Mutex
-	dynIPs map[string]bool // IPs das exceções vistos pelo DNSProxy
+	dynIPs map[string]bool      // IPs das exceções vistos pelo DNSProxy
+	found  map[string][]string  // exceção -> domínios descobertos
+	seenAt map[string]time.Time // exceção -> última descoberta (ou a decorrer)
+}
+
+// discovered devolve os domínios descobertos para as exceções e lança a
+// descoberta das que ainda não foram vistas (ou já há DiscoverEvery).
+func (e *Enforcer) discovered(allow, blocked []string) []string {
+	if !e.Discover {
+		return nil
+	}
+	e.dynMu.Lock()
+	defer e.dynMu.Unlock()
+	if e.found == nil {
+		e.found, e.seenAt = map[string][]string{}, map[string]time.Time{}
+	}
+	var out []string
+	for _, site := range allow {
+		out = append(out, e.found[site]...)
+		if at, ok := e.seenAt[site]; ok && time.Since(at) < DiscoverEvery {
+			continue
+		}
+		e.seenAt[site] = time.Now()
+		go func(site string) {
+			fetch := e.Fetch
+			if fetch == nil {
+				fetch = e.discoverFetch
+				// Deixa o firewall das exceções assentar antes de ligar.
+				time.Sleep(3 * time.Second)
+			}
+			hosts, err := Discover(site, blocked, fetch)
+			e.dynMu.Lock()
+			defer e.dynMu.Unlock()
+			if err != nil {
+				log.Printf("descoberta %s: %v (nova tentativa em 10 min)", site, err)
+				e.seenAt[site] = time.Now().Add(10*time.Minute - DiscoverEvery)
+				return
+			}
+			log.Printf("descoberta %s: %v", site, hosts)
+			e.found[site] = hosts
+		}(site)
+	}
+	return out
 }
 
 // AllowIPs abre já no firewall IPs de uma exceção que o Mac acabou de
@@ -64,6 +111,14 @@ func (e *Enforcer) AllowIPs(ips []netip.Addr) {
 	if len(added) > 0 {
 		pfAddAllow(added)
 	}
+}
+
+func mergeSorted(a, b []string) []string {
+	set := map[string]bool{}
+	for _, s := range append(append([]string(nil), a...), b...) {
+		set[s] = true
+	}
+	return sortedSet(set)
 }
 
 // allowSet junta os IPs resolvidos à partida com os vistos pelo DNSProxy.
@@ -105,7 +160,13 @@ func (e *Enforcer) Apply(domains, allow []string) {
 
 	var allowDomains []string
 	if len(allow) > 0 {
-		allowDomains = sites.AllowDomains(allow)
+		var blocked []string
+		for _, d := range domains {
+			if d != sites.Internet {
+				blocked = append(blocked, d)
+			}
+		}
+		allowDomains = mergeSorted(sites.AllowDomains(allow), e.discovered(allow, blocked))
 	}
 	if e.DNS != nil {
 		e.DNS.SetDomains(allowDomains)
