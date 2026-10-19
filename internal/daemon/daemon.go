@@ -44,13 +44,23 @@ func Run() error {
 		return fmt.Errorf("o daemon precisa rodar como root")
 	}
 	st := guard.Store.Load()
+	enf := &enforce.Enforcer{BlockIPs: true, ResolverDir: enforce.DefaultResolverDir}
+	enf.DNS = &enforce.DNSProxy{Upstream: enforce.UpstreamDNS, Allow: enf.AllowIPs}
 	d := &Daemon{
 		st:    st,
 		clock: clock.New(st.ClockOffset, st.LastTrusted),
 		store: guard.Store,
-		enf:   &enforce.Enforcer{BlockIPs: true},
+		enf:   enf,
 		kick:  make(chan struct{}, 1),
 	}
+	go func() {
+		for {
+			if err := enf.DNS.Serve(enforce.DNSProxyAddr); err != nil {
+				log.Printf("dns: %v; tentando de novo em 5s", err)
+			}
+			time.Sleep(5 * time.Second)
+		}
+	}()
 	// Aplica imediatamente, antes de qualquer rede: no boot o bloqueio já vale.
 	d.tick()
 	go d.syncNTP()

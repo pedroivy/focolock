@@ -132,17 +132,49 @@ func Expand(domains []string) []string {
 	return out
 }
 
-// ExpandAllow é como Expand, mas para as exceções ao bloqueio da internet:
-// permitir "app.exemplo.com" também permite "exemplo.com". É comum a página
-// estar num subdomínio e os dados (API, login, imagens) no domínio principal.
-func ExpandAllow(domains []string) []string {
-	all := append([]string(nil), domains...)
-	for _, d := range domains {
-		if root, err := publicsuffix.EffectiveTLDPlusOne(d); err == nil && root != d {
-			all = append(all, root)
+// Companions: domínios de que um site precisa para funcionar (scripts,
+// login, vídeo). Permitir o site permite-os também.
+var Companions = map[string][]string{
+	"chatgpt.com": {"openai.com", "oaistatic.com", "oaiusercontent.com", "challenges.cloudflare.com"},
+	"openai.com":  {"chatgpt.com", "oaistatic.com", "oaiusercontent.com", "challenges.cloudflare.com"},
+	"claude.ai":   {"anthropic.com", "claudeusercontent.com", "challenges.cloudflare.com"},
+	"youtube.com": {"googlevideo.com", "ytimg.com", "ggpht.com", "youtube-nocookie.com", "gstatic.com"},
+}
+
+// AllowDomains devolve os domínios (cada um com todos os subdomínios) que
+// uma lista de exceções abre: os próprios, o domínio principal de cada um
+// (permitir "app.exemplo.com" abre "exemplo.com", onde costumam estar a API
+// e o login) e os Companions.
+func AllowDomains(allow []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(d string) {
+		if !seen[d] {
+			seen[d] = true
+			out = append(out, d)
 		}
 	}
-	return Expand(all)
+	for _, d := range allow {
+		add(d)
+		root, err := publicsuffix.EffectiveTLDPlusOne(d)
+		if err == nil {
+			add(root)
+		} else {
+			root = d
+		}
+		for _, c := range Companions[root] {
+			add(c)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// ExpandAllow são os nomes resolvidos à partida para as exceções (os
+// restantes subdomínios são abertos quando o Mac os resolve; ver
+// enforce.DNSProxy).
+func ExpandAllow(allow []string) []string {
+	return Expand(AllowDomains(allow))
 }
 
 // Servidores de DNS-over-HTTPS. Navegadores com "DNS seguro" ignoram o

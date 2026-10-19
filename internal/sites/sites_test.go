@@ -2,6 +2,7 @@ package sites
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -71,5 +72,17 @@ func TestExpandAllowIncludesParentDomain(t *testing.T) {
 	}
 	if strings.Contains(got, " co.uk") || strings.HasPrefix(got, "co.uk") {
 		t.Errorf("não pode permitir o sufixo público: %s", got)
+	}
+}
+
+func TestAllowDomains(t *testing.T) {
+	got := AllowDomains([]string{"chatgpt.com", "app.ivyflash.com"})
+	for _, want := range []string{"chatgpt.com", "oaistatic.com", "openai.com", "challenges.cloudflare.com", "app.ivyflash.com", "ivyflash.com"} {
+		if !slices.Contains(got, want) {
+			t.Errorf("faltou %q em %v", want, got)
+		}
+	}
+	if slices.Contains(got, "cloudflare.com") {
+		t.Errorf("abriu a cloudflare toda: %v", got)
 	}
 }

@@ -41,6 +41,12 @@ func ResolveAllowIPs(hosts []string) []string {
 	})
 }
 
+// UpstreamDNS: servidores para onde o DNSProxy encaminha (o DNS do sistema
+// primeiro, porque é o que o navegador usaria; depois os públicos).
+func UpstreamDNS() []string {
+	return append(systemDNS(), DNSServers...)
+}
+
 // systemDNS lê os servidores do /etc/resolv.conf (o macOS mantém-no em dia).
 func systemDNS() []string {
 	data, err := os.ReadFile("/etc/resolv.conf")

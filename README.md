@@ -26,12 +26,15 @@ focolock remover <id>          # só vale daqui a 24h, e nunca no meio de uma ja
 **Toda a internet, com exceções:** na app escolha "Toda a internet" em vez de
 "Sites" e adicione os sites que devem continuar a funcionar (no Terminal,
 `internet` com `--exceto`). Vale para bloqueios, horários fixos e
-temporizadores. Só passa o tráfego para os IPs desses sites (re-resolvidos a
-cada 2 min) e o DNS comum; o resto fica cortado. Permitir um subdomínio
-(`app.exemplo.com`) também permite o domínio principal (`exemplo.com`), onde
-costumam estar a API e o login. Um site que carrega conteúdo
-de outros domínios (ex.: YouTube usa `googlevideo.com` e `ytimg.com`) precisa
-deles também na lista. Se dois bloqueios de internet estiverem ativos ao
+temporizadores. Só passa o tráfego para esses sites e o resto
+fica cortado. Cada exceção vale para o domínio e todos os subdomínios: o
+serviço passa a ser o DNS desses domínios (`/etc/resolver/<domínio>` aponta
+para `127.0.0.1:47853`) e abre no firewall cada IP que devolve. Permitir
+`app.exemplo.com` também permite `exemplo.com`, e alguns sites conhecidos
+trazem os domínios de que precisam (ex.: `chatgpt.com` abre `oaistatic.com`,
+`openai.com` e o desafio da Cloudflare). Outros sites que carreguem conteúdo
+de domínios diferentes precisam deles também na lista.
+Se dois bloqueios de internet estiverem ativos ao
 mesmo tempo, só passa o que os dois permitem.
 
 **Temporizador:** os sites ficam sempre bloqueados. Em cada período do dia

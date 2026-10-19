@@ -62,6 +62,14 @@ func killStates(ips []string) {
 	}
 }
 
+// pfAddAllow acrescenta IPs à tabela de exceções sem recarregar as regras.
+func pfAddAllow(ips []string) {
+	args := append([]string{"-a", AnchorName, "-t", AllowTable, "-T", "add"}, ips...)
+	if _, err := run("/sbin/pfctl", args...); err != nil {
+		log.Printf("pf: %v", err)
+	}
+}
+
 func killAllStates() {
 	_, _ = run("/sbin/pfctl", "-F", "states")
 }

@@ -31,16 +31,16 @@ func TestRenderHostsNoTrailingNewline(t *testing.T) {
 }
 
 func TestRenderPF(t *testing.T) {
-	got := RenderPF([]string{"1.2.3.4"}, []string{"8.8.8.8"}, false, nil)
+	got := RenderPF([]string{"1.2.3.4"}, []string{"8.8.8.8"}, false, false, nil)
 	for _, want := range []string{"<focolock_sites> const { 1.2.3.4 }", "to <focolock_doh> port 443"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("faltou %q em:\n%s", want, got)
 		}
 	}
-	if strings.Contains(RenderPF(nil, nil, false, nil), "block") {
+	if strings.Contains(RenderPF(nil, nil, false, false, nil), "block") {
 		t.Error("sem sites não deveria haver regras")
 	}
-	all := RenderPF([]string{"1.2.3.4"}, []string{"8.8.8.8"}, true, nil)
+	all := RenderPF([]string{"1.2.3.4"}, []string{"8.8.8.8"}, true, false, nil)
 	// O loopback tem de passar antes do bloqueio total, senão a app perde o serviço.
 	if i, j := strings.Index(all, "pass out quick on lo0"), strings.Index(all, "block drop out quick all"); i < 0 || j < 0 || i > j {
 		t.Errorf("regras de internet erradas:\n%s", all)
@@ -48,9 +48,9 @@ func TestRenderPF(t *testing.T) {
 }
 
 func TestRenderPFInternetWithExceptions(t *testing.T) {
-	got := RenderPF(nil, []string{"8.8.8.8"}, true, []string{"1.2.3.4", "2001:db8::1"})
+	got := RenderPF(nil, []string{"8.8.8.8"}, true, true, []string{"1.2.3.4", "2001:db8::1"})
 	order := []string{
-		"table <focolock_allow> const { 1.2.3.4, 2001:db8::1 }",
+		"table <focolock_allow> persist { 1.2.3.4, 2001:db8::1 }",
 		"table <focolock_doh> const { 8.8.8.8 }",
 		"pass out quick on lo0",
 		"to <focolock_doh> port { 443, 853 }",
@@ -67,7 +67,16 @@ func TestRenderPFInternetWithExceptions(t *testing.T) {
 		last = i
 	}
 	// Sem exceções, nem o DNS passa.
-	if strings.Contains(RenderPF(nil, nil, true, nil), "port 53") {
+	if strings.Contains(RenderPF(nil, nil, true, false, nil), "port 53") {
 		t.Error("sem exceções o DNS não deveria passar")
+	}
+}
+
+func TestRenderPFExceptionsWithoutIPsYet(t *testing.T) {
+	got := RenderPF(nil, nil, true, true, nil)
+	for _, want := range []string{"table <focolock_allow> persist\n", "pass out quick from any to <focolock_allow>", "port 53"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("faltou %q em:\n%s", want, got)
+		}
 	}
 }

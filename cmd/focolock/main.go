@@ -376,7 +376,7 @@ func cmdUninstall() error {
 		return err
 	}
 	// Remove a seção do /etc/hosts e esvazia o anchor do firewall.
-	(&enforce.Enforcer{}).Apply(nil, nil)
+	(&enforce.Enforcer{ResolverDir: enforce.DefaultResolverDir}).Apply(nil, nil)
 	fmt.Println("Desinstalado.")
 	return nil
 }

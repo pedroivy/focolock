@@ -3,8 +3,11 @@ package enforce
 import (
 	"bytes"
 	"log"
+	"net/netip"
 	"os"
 	"slices"
+	"sort"
+	"sync"
 	"time"
 
 	"github.com/pedroivy/focolock/internal/sites"
@@ -26,6 +29,10 @@ const AllowRefresh = 2 * time.Minute
 type Enforcer struct {
 	BlockIPs  bool   // também bloquear por IP no firewall (mais forte, pode afetar CDNs compartilhadas)
 	HostsFile string // padrão: /etc/hosts
+	// ResolverDir: onde escrever /etc/resolver/<domínio> para as exceções
+	// (vazio = não escrever). DNS recebe as consultas desses domínios.
+	ResolverDir string
+	DNS         *DNSProxy
 
 	lastDomains []string
 	lastAllow   []string
@@ -34,6 +41,51 @@ type Enforcer struct {
 	ipsAt       time.Time
 	allowIPs    []string
 	allowAt     time.Time
+
+	dynMu  sync.Mutex
+	dynIPs map[string]bool // IPs das exceções vistos pelo DNSProxy
+}
+
+// AllowIPs abre já no firewall IPs de uma exceção que o Mac acabou de
+// resolver. É chamado pelo DNSProxy, fora do ciclo de Apply.
+func (e *Enforcer) AllowIPs(ips []netip.Addr) {
+	e.dynMu.Lock()
+	if e.dynIPs == nil {
+		e.dynIPs = map[string]bool{}
+	}
+	var added []string
+	for _, ip := range ips {
+		if s := ip.Unmap().String(); ip.IsGlobalUnicast() && !e.dynIPs[s] {
+			e.dynIPs[s] = true
+			added = append(added, s)
+		}
+	}
+	e.dynMu.Unlock()
+	if len(added) > 0 {
+		pfAddAllow(added)
+	}
+}
+
+// allowSet junta os IPs resolvidos à partida com os vistos pelo DNSProxy.
+func (e *Enforcer) allowSet(static []string, reset bool) []string {
+	e.dynMu.Lock()
+	defer e.dynMu.Unlock()
+	if reset {
+		e.dynIPs = nil
+	}
+	set := map[string]bool{}
+	for _, ip := range static {
+		set[ip] = true
+	}
+	for ip := range e.dynIPs {
+		set[ip] = true
+	}
+	out := make([]string, 0, len(set))
+	for ip := range set {
+		out = append(out, ip)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // Apply bloqueia domains. Se domains contiver sites.Internet, allow são os
@@ -51,7 +103,16 @@ func (e *Enforcer) Apply(domains, allow []string) {
 		hosts = append(sites.Expand(domains), sites.DoHHosts...)
 	}
 
-	if e.writeHosts(hosts) || changed {
+	var allowDomains []string
+	if len(allow) > 0 {
+		allowDomains = sites.AllowDomains(allow)
+	}
+	if e.DNS != nil {
+		e.DNS.SetDomains(allowDomains)
+	}
+	resolversChanged := e.ResolverDir != "" && writeResolvers(e.ResolverDir, allowDomains)
+
+	if e.writeHosts(hosts) || changed || resolversChanged {
 		flushDNS()
 	}
 
@@ -70,9 +131,11 @@ func (e *Enforcer) Apply(domains, allow []string) {
 		if allowChanged || time.Since(e.allowAt) > AllowRefresh {
 			e.allowIPs, e.allowAt = ResolveAllowIPs(sites.ExpandAllow(allow)), time.Now()
 		}
-		allowIPs = e.allowIPs
+		allowIPs = e.allowSet(e.allowIPs, allowChanged)
+	} else {
+		e.allowSet(nil, true)
 	}
-	rules := RenderPF(ips, doh, blockAll, allowIPs)
+	rules := RenderPF(ips, doh, blockAll, len(allow) > 0, allowIPs)
 	if rules != e.lastPF || !pfIntact(len(domains) > 0) {
 		if err := loadPF(rules, len(domains) > 0); err != nil {
 			log.Printf("pf: %v", err)
