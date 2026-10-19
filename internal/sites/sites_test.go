@@ -2,6 +2,7 @@ package sites
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -58,5 +59,17 @@ func TestNormalizeAllow(t *testing.T) {
 	}
 	if _, err := NormalizeAllow([]string{Internet}, []string{"internet"}); err == nil {
 		t.Error("a internet não pode ser exceção")
+	}
+}
+
+func TestExpandAllowIncludesParentDomain(t *testing.T) {
+	got := strings.Join(ExpandAllow([]string{"app.ivyflash.com", "bbc.co.uk"}), " ")
+	for _, want := range []string{"app.ivyflash.com", " ivyflash.com", "www.ivyflash.com", "bbc.co.uk"} {
+		if !strings.Contains(" "+got, want) {
+			t.Errorf("faltou %q em %s", want, got)
+		}
+	}
+	if strings.Contains(got, " co.uk") || strings.HasPrefix(got, "co.uk") {
+		t.Errorf("não pode permitir o sufixo público: %s", got)
 	}
 }

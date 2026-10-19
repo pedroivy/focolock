@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"golang.org/x/net/publicsuffix"
 )
 
 var hostRe = regexp.MustCompile(`^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$`)
@@ -128,6 +130,19 @@ func Expand(domains []string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// ExpandAllow é como Expand, mas para as exceções ao bloqueio da internet:
+// permitir "app.exemplo.com" também permite "exemplo.com". É comum a página
+// estar num subdomínio e os dados (API, login, imagens) no domínio principal.
+func ExpandAllow(domains []string) []string {
+	all := append([]string(nil), domains...)
+	for _, d := range domains {
+		if root, err := publicsuffix.EffectiveTLDPlusOne(d); err == nil && root != d {
+			all = append(all, root)
+		}
+	}
+	return Expand(all)
 }
 
 // Servidores de DNS-over-HTTPS. Navegadores com "DNS seguro" ignoram o

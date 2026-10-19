@@ -68,7 +68,7 @@ func (e *Enforcer) Apply(domains, allow []string) {
 	var allowIPs []string
 	if len(allow) > 0 && e.BlockIPs {
 		if allowChanged || time.Since(e.allowAt) > AllowRefresh {
-			e.allowIPs, e.allowAt = ResolveAllowIPs(sites.Expand(allow)), time.Now()
+			e.allowIPs, e.allowAt = ResolveAllowIPs(sites.ExpandAllow(allow)), time.Now()
 		}
 		allowIPs = e.allowIPs
 	}
