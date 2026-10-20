@@ -188,7 +188,7 @@ func (e *Enforcer) discoverFetch(u *url.URL) (string, error) {
 			if len(ips) == 0 {
 				return nil, fmt.Errorf("não resolveu %s", host)
 			}
-			e.AllowIPs(ips)
+			e.AllowIPs(host, ips)
 			var lastErr error
 			for _, ip := range ips {
 				c, err := dialer.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))

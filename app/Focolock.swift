@@ -160,6 +160,9 @@ final class Model: ObservableObject {
         req.timeoutInterval = 10
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue(token, forHTTPHeaderField: "X-Focolock-Token")
+        // Uma ligação nova por pedido: se o firewall cortar ligações abertas
+        // (início de um bloqueio), a app não fica presa a uma ligação morta.
+        req.setValue("close", forHTTPHeaderField: "Connection")
         var payload = body
         payload["tz"] = TimeZone.current.identifier
         req.httpBody = try JSONSerialization.data(withJSONObject: payload)

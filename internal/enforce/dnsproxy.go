@@ -24,9 +24,9 @@ const DNSProxyAddr = "127.0.0.1:47853"
 // avisa (Allow) os IPs da resposta antes de a devolver, para o firewall já os
 // deixar passar quando o navegador ligar.
 type DNSProxy struct {
-	Upstream func() []string        // servidores "ip:53"
-	Allow    func(ips []netip.Addr) // chamado antes de responder
-	Timeout  time.Duration          // por servidor; padrão 3s
+	Upstream func() []string                       // servidores "ip:53"
+	Allow    func(domain string, ips []netip.Addr) // chamado antes de responder; domain é a exceção que deu match
+	Timeout  time.Duration                         // por servidor; padrão 3s
 	query    func(server string, req []byte) ([]byte, error)
 
 	mu      sync.Mutex
@@ -40,16 +40,19 @@ func (p *DNSProxy) SetDomains(domains []string) {
 	p.domains = append([]string(nil), domains...)
 }
 
-func (p *DNSProxy) matches(name string) bool {
+func (p *DNSProxy) matches(name string) bool { return p.match(name) != "" }
+
+// match devolve o domínio atendido que cobre name ("" se nenhum).
+func (p *DNSProxy) match(name string) string {
 	name = strings.TrimSuffix(strings.ToLower(name), ".")
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for _, d := range p.domains {
 		if name == d || strings.HasSuffix(name, "."+d) {
-			return true
+			return d
 		}
 	}
-	return false
+	return ""
 }
 
 // Serve atende por UDP e TCP em addr até dar erro.
@@ -114,7 +117,8 @@ func (p *DNSProxy) Handle(req []byte) []byte {
 	if err := msg.Unpack(req); err != nil || len(msg.Questions) != 1 {
 		return nil
 	}
-	if !p.matches(msg.Questions[0].Name.String()) {
+	domain := p.match(msg.Questions[0].Name.String())
+	if domain == "" {
 		return reply(msg, dnsmessage.RCodeNameError)
 	}
 	query := p.query
@@ -140,7 +144,7 @@ func (p *DNSProxy) Handle(req []byte) []byte {
 			}
 		}
 		if len(ips) > 0 && p.Allow != nil {
-			p.Allow(ips)
+			p.Allow(domain, ips)
 		}
 		return resp
 	}

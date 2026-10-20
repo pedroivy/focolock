@@ -48,9 +48,12 @@ type Enforcer struct {
 	allowAt     time.Time
 
 	dynMu  sync.Mutex
-	dynIPs map[string]bool      // IPs das exceções vistos pelo DNSProxy
-	found  map[string][]string  // exceção -> domínios descobertos
-	seenAt map[string]time.Time // exceção -> última descoberta (ou a decorrer)
+	dynIPs map[string]map[string]bool // exceção -> IPs vistos pelo DNSProxy
+	// lastAllowIPs: IPs abertos no último carregamento (para cortar ligações
+	// aos que deixarem de estar, ex.: fim de uma pausa do temporizador).
+	lastAllowIPs []string
+	found        map[string][]string  // exceção -> domínios descobertos
+	seenAt       map[string]time.Time // exceção -> última descoberta (ou a decorrer)
 }
 
 // discovered devolve os domínios descobertos para as exceções e lança a
@@ -95,15 +98,18 @@ func (e *Enforcer) discovered(allow, blocked []string) []string {
 
 // AllowIPs abre já no firewall IPs de uma exceção que o Mac acabou de
 // resolver. É chamado pelo DNSProxy, fora do ciclo de Apply.
-func (e *Enforcer) AllowIPs(ips []netip.Addr) {
+func (e *Enforcer) AllowIPs(domain string, ips []netip.Addr) {
 	e.dynMu.Lock()
 	if e.dynIPs == nil {
-		e.dynIPs = map[string]bool{}
+		e.dynIPs = map[string]map[string]bool{}
+	}
+	if e.dynIPs[domain] == nil {
+		e.dynIPs[domain] = map[string]bool{}
 	}
 	var added []string
 	for _, ip := range ips {
-		if s := ip.Unmap().String(); ip.IsGlobalUnicast() && !e.dynIPs[s] {
-			e.dynIPs[s] = true
+		if s := ip.Unmap().String(); ip.IsGlobalUnicast() && !e.dynIPs[domain][s] {
+			e.dynIPs[domain][s] = true
 			added = append(added, s)
 		}
 	}
@@ -111,6 +117,17 @@ func (e *Enforcer) AllowIPs(ips []netip.Addr) {
 	if len(added) > 0 {
 		pfAddAllow(added)
 	}
+}
+
+// minus devolve os elementos de a que não estão em b.
+func minus(a, b []string) []string {
+	var out []string
+	for _, s := range a {
+		if !slices.Contains(b, s) {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 func mergeSorted(a, b []string) []string {
@@ -121,19 +138,27 @@ func mergeSorted(a, b []string) []string {
 	return sortedSet(set)
 }
 
-// allowSet junta os IPs resolvidos à partida com os vistos pelo DNSProxy.
-func (e *Enforcer) allowSet(static []string, reset bool) []string {
+// allowSet junta os IPs resolvidos à partida com os vistos pelo DNSProxy
+// para os domínios ainda permitidos; os dos outros são esquecidos.
+func (e *Enforcer) allowSet(static, domains []string) []string {
 	e.dynMu.Lock()
 	defer e.dynMu.Unlock()
-	if reset {
-		e.dynIPs = nil
+	keep := map[string]bool{}
+	for _, d := range domains {
+		keep[d] = true
 	}
 	set := map[string]bool{}
 	for _, ip := range static {
 		set[ip] = true
 	}
-	for ip := range e.dynIPs {
-		set[ip] = true
+	for d, ips := range e.dynIPs {
+		if !keep[d] {
+			delete(e.dynIPs, d)
+			continue
+		}
+		for ip := range ips {
+			set[ip] = true
+		}
 	}
 	out := make([]string, 0, len(set))
 	for ip := range set {
@@ -192,9 +217,9 @@ func (e *Enforcer) Apply(domains, allow []string) {
 		if allowChanged || time.Since(e.allowAt) > AllowRefresh {
 			e.allowIPs, e.allowAt = ResolveAllowIPs(sites.ExpandAllow(allow)), time.Now()
 		}
-		allowIPs = e.allowSet(e.allowIPs, allowChanged)
+		allowIPs = e.allowSet(e.allowIPs, allowDomains)
 	} else {
-		e.allowSet(nil, true)
+		e.allowSet(nil, nil)
 	}
 	rules := RenderPF(ips, doh, blockAll, len(allow) > 0, allowIPs)
 	if rules != e.lastPF || !pfIntact(len(domains) > 0) {
@@ -203,11 +228,17 @@ func (e *Enforcer) Apply(domains, allow []string) {
 		} else {
 			e.lastPF = rules
 			// Conexões já abertas (HTTP/2, websockets) sobreviveriam ao bloqueio.
-			if blockAll && (!wasBlockingAll || allowChanged) {
+			// O loopback não guarda estado no pf, por isso a ligação da app ao
+			// serviço sobrevive a isto.
+			switch {
+			case blockAll && !wasBlockingAll:
 				killAllStates()
-			} else {
+			case blockAll:
+				killStates(minus(e.lastAllowIPs, allowIPs))
+			default:
 				killStates(ips)
 			}
+			e.lastAllowIPs = allowIPs
 		}
 	}
 	if changed || allowChanged {

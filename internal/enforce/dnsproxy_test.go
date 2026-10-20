@@ -46,7 +46,7 @@ func TestDNSProxyAllowsSubdomains(t *testing.T) {
 	var allowed []netip.Addr
 	p := &DNSProxy{
 		Upstream: func() []string { return []string{"9.9.9.9:53"} },
-		Allow:    func(ips []netip.Addr) { allowed = append(allowed, ips...) },
+		Allow:    func(_ string, ips []netip.Addr) { allowed = append(allowed, ips...) },
 	}
 	p.query = fakeUpstream(t, &calls)
 	p.SetDomains([]string{"chatgpt.com", "oaistatic.com"})
@@ -120,8 +120,13 @@ func TestEnforcerAllowsDynamicIPs(t *testing.T) {
 			t.Errorf("proxy não atende %s", d)
 		}
 	}
-	e.AllowIPs([]netip.Addr{netip.MustParseAddr("1.2.3.4"), netip.MustParseAddr("127.0.0.1")})
-	if got := e.allowSet([]string{"5.6.7.8"}, false); !slices.Equal(got, []string{"1.2.3.4", "5.6.7.8"}) {
+	e.AllowIPs("chatgpt.com", []netip.Addr{netip.MustParseAddr("1.2.3.4"), netip.MustParseAddr("127.0.0.1")})
+	e.AllowIPs("x.com", []netip.Addr{netip.MustParseAddr("9.9.9.9")}) // pausa de um temporizador
+	if got := e.allowSet([]string{"5.6.7.8"}, []string{"chatgpt.com", "x.com"}); !slices.Equal(got, []string{"1.2.3.4", "5.6.7.8", "9.9.9.9"}) {
+		t.Fatalf("allowSet = %v", got)
+	}
+	// Fim da pausa: só os IPs de x.com saem.
+	if got := e.allowSet([]string{"5.6.7.8"}, []string{"chatgpt.com"}); !slices.Equal(got, []string{"1.2.3.4", "5.6.7.8"}) {
 		t.Fatalf("allowSet = %v", got)
 	}
 	// Fim do bloqueio: tudo limpo.
@@ -129,7 +134,7 @@ func TestEnforcerAllowsDynamicIPs(t *testing.T) {
 	if entries, _ := os.ReadDir(filepath.Join(dir, "resolver")); len(entries) != 0 {
 		t.Fatalf("resolvers ficaram: %v", entries)
 	}
-	if e.DNS.matches("chatgpt.com") || len(e.allowSet(nil, false)) != 0 {
+	if e.DNS.matches("chatgpt.com") || len(e.allowSet(nil, []string{"chatgpt.com"})) != 0 {
 		t.Fatal("exceções ficaram ativas")
 	}
 }

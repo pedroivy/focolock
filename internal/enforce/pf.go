@@ -34,7 +34,9 @@ func RenderPF(blockedIPs, dohIPs []string, blockAll, allow bool, allowIPs []stri
 				fmt.Fprintf(&b, "table <focolock_doh> const { %s }\n", strings.Join(dohIPs, ", "))
 			}
 		}
-		b.WriteString("pass out quick on lo0 all\n")
+		// Sem estado: limpar os estados do pf (ao começar o bloqueio) não pode
+		// cortar a ligação da app ao serviço em 127.0.0.1.
+		b.WriteString("pass out quick on lo0 all no state\n")
 		b.WriteString("pass out quick proto udp from any port 68 to any port 67\n")
 		b.WriteString("pass out quick inet6 proto ipv6-icmp all\n")
 		if allow {

@@ -52,7 +52,7 @@ func TestRenderPFInternetWithExceptions(t *testing.T) {
 	order := []string{
 		"table <focolock_allow> persist { 1.2.3.4, 2001:db8::1 }",
 		"table <focolock_doh> const { 8.8.8.8 }",
-		"pass out quick on lo0",
+		"pass out quick on lo0 all no state",
 		"to <focolock_doh> port { 443, 853 }",
 		"pass out quick proto { tcp, udp } from any to any port 53",
 		"pass out quick from any to <focolock_allow>",

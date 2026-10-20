@@ -59,7 +59,8 @@ func systemDNS() []string {
 		if len(f) < 2 || f[0] != "nameserver" {
 			continue
 		}
-		if ip, err := netip.ParseAddr(f[1]); err == nil && !ip.IsLoopback() {
+		// Link-local (fe80::…%en0) não serve sem a interface: só daria timeouts.
+		if ip, err := netip.ParseAddr(f[1]); err == nil && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() {
 			out = append(out, netip.AddrPortFrom(ip.WithZone(""), 53).String())
 		}
 	}
