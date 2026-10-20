@@ -63,12 +63,18 @@ struct SchedDTO: Decodable, Identifiable {
     let from: Int
     let to: Int
     let tz: String
+    let delays: [DelayDTO]?
     let removeAfter: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, name, sites, allow, days, from, to, tz
+        case id, name, sites, allow, days, from, to, tz, delays
         case removeAfter = "remove_after"
     }
+}
+
+struct DelayDTO: Decodable {
+    let day: String
+    let minutes: Int
 }
 
 struct TimerDTO: Decodable, Identifiable {
@@ -216,6 +222,15 @@ final class Model: ObservableObject {
         }
     }
 
+    func delaySchedule(_ id: String, minutes: Int) async {
+        do {
+            let r = try await call(["cmd": "schedule_delay", "id": id, "minutes": minutes])
+            toast = r.message
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     func removeSchedule(_ id: String) async {
         do {
             let r = try await call(["cmd": "schedule_remove", "id": id])
@@ -346,17 +361,53 @@ func hhmm(_ date: Date) -> String {
     return f.string(from: date)
 }
 
-func scheduleActive(_ s: SchedDTO, at now: Date) -> Bool {
+/// Janela que começa no dia de `day` (com o adiamento desse dia). Mesmas
+/// regras do serviço (state.Schedule.Window).
+func scheduleWindow(_ s: SchedDTO, day: Date) -> (start: Date, end: Date)? {
     var cal = Calendar(identifier: .gregorian)
     cal.timeZone = TimeZone(identifier: s.tz) ?? .current
-    let c = cal.dateComponents([.hour, .minute, .weekday], from: now)
-    let m = (c.hour ?? 0) * 60 + (c.minute ?? 0)
-    let today = (c.weekday ?? 1) - 1 // Calendar: 1 = domingo
-    let yesterday = (today + 6) % 7
-    let has = { (d: Int) in s.days.contains(d) }
-    if s.from == s.to { return has(today) }
-    if s.from < s.to { return has(today) && m >= s.from && m < s.to }
-    return (has(today) && m >= s.from) || (has(yesterday) && m < s.to)
+    let c = cal.dateComponents([.year, .month, .day, .weekday], from: day)
+    guard s.days.contains((c.weekday ?? 1) - 1) else { return nil }
+    func at(_ plusDays: Int, _ minutes: Int) -> Date {
+        var d = DateComponents()
+        d.year = c.year; d.month = c.month; d.day = (c.day ?? 1) + plusDays
+        d.hour = minutes / 60; d.minute = minutes % 60
+        return cal.date(from: d) ?? day
+    }
+    var start: Date, end: Date
+    if s.from == s.to { start = at(0, 0); end = at(1, 0) }
+    else if s.from < s.to { start = at(0, s.from); end = at(0, s.to) }
+    else { start = at(0, s.from); end = at(1, s.to) }
+    let f = DateFormatter()
+    f.locale = Locale(identifier: "en_US_POSIX")
+    f.calendar = cal
+    f.timeZone = cal.timeZone
+    f.dateFormat = "yyyy-MM-dd"
+    let key = f.string(from: day)
+    let shift = Double(s.delays?.first { $0.day == key }?.minutes ?? 0) * 60
+    return (start.addingTimeInterval(shift), end.addingTimeInterval(shift))
+}
+
+func scheduleActive(_ s: SchedDTO, at now: Date) -> Bool {
+    for day in [now, now.addingTimeInterval(-86400)] {
+        if let w = scheduleWindow(s, day: day), w.start <= now, now < w.end { return true }
+    }
+    return false
+}
+
+/// Pode adiar hoje: a janela de hoje ainda não começou e não foi adiada.
+func canDelay(_ s: SchedDTO, at now: Date) -> Bool {
+    guard s.removeAfter == nil, (s.delays ?? []).allSatisfy({ !scheduleDelayedToday(s, $0, now) }),
+          let w = scheduleWindow(s, day: now) else { return false }
+    return now < w.start && !scheduleActive(s, at: now)
+}
+
+func scheduleDelayedToday(_ s: SchedDTO, _ d: DelayDTO, _ now: Date) -> Bool {
+    let f = DateFormatter()
+    f.locale = Locale(identifier: "en_US_POSIX")
+    f.timeZone = TimeZone(identifier: s.tz) ?? .current
+    f.dateFormat = "yyyy-MM-dd"
+    return d.day == f.string(from: now)
 }
 
 enum PeriodStatus: Equatable {
@@ -852,6 +903,7 @@ struct SchedulesCard: View {
     @EnvironmentObject var model: Model
     @State private var showNew = false
     @State private var removing: SchedDTO?
+    @State private var delaying: SchedDTO?
 
     var body: some View {
         Card(title: "Horários fixos") {
@@ -869,6 +921,10 @@ struct SchedulesCard: View {
                         Text(meta(s)).font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
+                    if canDelay(s, at: model.now) {
+                        Button("Adiar") { delaying = s }
+                            .help("Adiar o bloqueio de hoje (antes de começar, até 1 hora, uma vez por dia)")
+                    }
                     if s.removeAfter == nil {
                         Button("Remover") { removing = s }
                     }
@@ -884,6 +940,16 @@ struct SchedulesCard: View {
         .sheet(isPresented: $showNew) {
             NewScheduleView().environmentObject(model)
         }
+        .alert("Adiar o bloqueio de hoje?",
+               isPresented: Binding(get: { delaying != nil }, set: { if !$0 { delaying = nil } }),
+               presenting: delaying) { s in
+            Button("15 min") { Task { await model.delaySchedule(s.id, minutes: 15) } }
+            Button("30 min") { Task { await model.delaySchedule(s.id, minutes: 30) } }
+            Button("1 hora") { Task { await model.delaySchedule(s.id, minutes: 60) } }
+            Button("Voltar", role: .cancel) {}
+        } message: { _ in
+            Text("O bloqueio de hoje começa e acaba mais tarde (mantém a duração). Só dá uma vez por dia e só antes de começar.")
+        }
         .alert("Remover este horário?",
                isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }),
                presenting: removing) { s in
@@ -897,6 +963,10 @@ struct SchedulesCard: View {
     private func meta(_ s: SchedDTO) -> String {
         var m = s.days.sorted { ($0 + 6) % 7 < ($1 + 6) % 7 }.map { dayNames[$0] }.joined(separator: ", ")
         m += " · \(hhmm(s.from))–\(hhmm(s.to))"
+        if (s.delays ?? []).contains(where: { scheduleDelayedToday(s, $0, model.now) }),
+           let w = scheduleWindow(s, day: model.now) {
+            m += " · hoje adiado para \(hhmm(w.start))–\(hhmm(w.end))"
+        }
         if let r = parseDate(s.removeAfter) { m += " · sai \(formatEnd(r))" }
         return m
     }

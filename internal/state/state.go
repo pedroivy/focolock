@@ -28,15 +28,16 @@ type Lock struct {
 
 // Schedule é um bloqueio recorrente (ex.: seg-sex das 09:00 às 18:00).
 type Schedule struct {
-	ID      string         `json:"id"`
-	Name    string         `json:"name"`
-	Sites   []string       `json:"sites"`
-	Allow   []string       `json:"allow,omitempty"` // com "*": sites que continuam acessíveis
-	Days    []time.Weekday `json:"days"`
-	From    int            `json:"from"` // minutos desde 00:00
-	To      int            `json:"to"`   // minutos desde 00:00; To <= From atravessa a meia-noite
-	TZ      string         `json:"tz"`   // fixado na criação: mudar o fuso do Mac não burla
-	Created time.Time      `json:"created"`
+	ID      string          `json:"id"`
+	Name    string          `json:"name"`
+	Sites   []string        `json:"sites"`
+	Allow   []string        `json:"allow,omitempty"` // com "*": sites que continuam acessíveis
+	Days    []time.Weekday  `json:"days"`
+	From    int             `json:"from"` // minutos desde 00:00
+	To      int             `json:"to"`   // minutos desde 00:00; To <= From atravessa a meia-noite
+	TZ      string          `json:"tz"`   // fixado na criação: mudar o fuso do Mac não burla
+	Created time.Time       `json:"created"`
+	Delays  []ScheduleDelay `json:"delays,omitempty"`
 	// RemoveAfter: pedido de remoção; o agendamento só deixa de valer depois
 	// disso E fora de uma janela ativa.
 	RemoveAfter *time.Time `json:"remove_after,omitempty"`
@@ -55,7 +56,11 @@ type State struct {
 func (st *State) Clone() *State {
 	out := *st
 	out.Locks = append([]Lock(nil), st.Locks...)
-	out.Schedules = append([]Schedule(nil), st.Schedules...)
+	out.Schedules = make([]Schedule, len(st.Schedules))
+	for i, s := range st.Schedules {
+		s.Delays = append([]ScheduleDelay(nil), s.Delays...)
+		out.Schedules[i] = s
+	}
 	out.Timers = make([]Timer, len(st.Timers))
 	for i, t := range st.Timers {
 		t.Uses = append([]TimerUse(nil), t.Uses...)
@@ -86,20 +91,120 @@ func (s Schedule) hasDay(d time.Weekday) bool {
 	return false
 }
 
-// WindowActive diz se o horário cai numa janela do agendamento (ignorando remoção).
-func (s Schedule) WindowActive(now time.Time) bool {
-	t := now.In(s.location())
-	m := t.Hour()*60 + t.Minute()
-	today := t.Weekday()
-	yesterday := (today + 6) % 7
+// MaxDelay: quanto se pode adiar a janela de um dia (ver Delay).
+const MaxDelay = 60
+
+// ScheduleDelay adia a janela que começa no dia Day (AAAA-MM-DD, no fuso do
+// agendamento) Minutes minutos. A janela é empurrada, não encolhe.
+type ScheduleDelay struct {
+	Day     string `json:"day"`
+	Minutes int    `json:"minutes"`
+}
+
+func (s Schedule) delay(day string) int {
+	for _, d := range s.Delays {
+		if d.Day == day {
+			return d.Minutes
+		}
+	}
+	return 0
+}
+
+// Window devolve a janela que começa no dia de t (no fuso do agendamento),
+// já com o adiamento desse dia. ok é false se o dia não tem janela.
+func (s Schedule) Window(t time.Time) (start, end time.Time, ok bool) {
+	lt := t.In(s.location())
+	if !s.hasDay(lt.Weekday()) {
+		return start, end, false
+	}
+	y, m, d := lt.Date()
+	at := func(day, minutes int) time.Time {
+		return time.Date(y, m, d+day, minutes/60, minutes%60, 0, 0, lt.Location())
+	}
 	switch {
 	case s.From == s.To: // dia inteiro
-		return s.hasDay(today)
+		start, end = at(0, 0), at(1, 0)
 	case s.From < s.To:
-		return s.hasDay(today) && m >= s.From && m < s.To
+		start, end = at(0, s.From), at(0, s.To)
 	default: // atravessa a meia-noite, ex. 22:00-06:00
-		return (s.hasDay(today) && m >= s.From) || (s.hasDay(yesterday) && m < s.To)
+		start, end = at(0, s.From), at(1, s.To)
 	}
+	shift := time.Duration(s.delay(lt.Format("2006-01-02"))) * time.Minute
+	return start.Add(shift), end.Add(shift), true
+}
+
+// WindowActive diz se o horário cai numa janela do agendamento (ignorando remoção).
+func (s Schedule) WindowActive(now time.Time) bool {
+	lt := now.In(s.location())
+	// A janela ativa começou hoje ou ontem (se atravessa a meia-noite ou foi adiada).
+	for _, day := range []time.Time{lt, lt.AddDate(0, 0, -1)} {
+		if start, end, ok := s.Window(day); ok && !now.Before(start) && now.Before(end) {
+			return true
+		}
+	}
+	return false
+}
+
+// Delay adia a janela de hoje do agendamento id. Só antes de ela começar,
+// no máximo MaxDelay minutos e uma vez por dia: não serve para sair de um
+// bloqueio a meio.
+func (st *State) Delay(id string, minutes int, now time.Time) (time.Time, time.Time, error) {
+	var zero time.Time
+	if minutes < 1 || minutes > MaxDelay {
+		return zero, zero, fmt.Errorf("só dá para adiar entre 1 e %d minutos", MaxDelay)
+	}
+	for i := range st.Schedules {
+		s := &st.Schedules[i]
+		if s.ID != id {
+			continue
+		}
+		if s.Removed(now) {
+			return zero, zero, fmt.Errorf("agendamento %q já foi removido", id)
+		}
+		day := now.In(s.location()).Format("2006-01-02")
+		if s.delay(day) > 0 {
+			return zero, zero, fmt.Errorf("este horário já foi adiado hoje")
+		}
+		start, _, ok := s.Window(now)
+		if !ok {
+			return zero, zero, fmt.Errorf("este horário não tem bloqueio hoje")
+		}
+		if !now.Before(start) || s.WindowActive(now) {
+			return zero, zero, fmt.Errorf("só dá para adiar antes de o bloqueio começar")
+		}
+		s.Delays = append(s.Delays, ScheduleDelay{Day: day, Minutes: minutes})
+		start, end, _ := s.Window(now)
+		return start, end, nil
+	}
+	return zero, zero, fmt.Errorf("agendamento %q não encontrado", id)
+}
+
+// pruneDelays descarta adiamentos com mais de dois dias.
+func (s *Schedule) pruneDelays(now time.Time) bool {
+	cutoff := now.In(s.location()).AddDate(0, 0, -2).Format("2006-01-02")
+	out := s.Delays[:0]
+	for _, d := range s.Delays {
+		if d.Day >= cutoff {
+			out = append(out, d)
+		}
+	}
+	changed := len(out) != len(s.Delays)
+	s.Delays = out
+	return changed
+}
+
+// intersectDelays: só valem adiamentos que estão nas duas cópias do estado.
+func intersectDelays(a, b []ScheduleDelay) []ScheduleDelay {
+	var out []ScheduleDelay
+	for _, x := range a {
+		for _, y := range b {
+			if x == y {
+				out = append(out, x)
+				break
+			}
+		}
+	}
+	return out
 }
 
 // Removed diz se o agendamento já pode ser descartado.
@@ -273,6 +378,9 @@ func (st *State) Prune(now time.Time) bool {
 	scheds := st.Schedules[:0]
 	for _, sc := range st.Schedules {
 		if !sc.Removed(now) {
+			if sc.pruneDelays(now) {
+				changed = true
+			}
 			scheds = append(scheds, sc)
 		} else {
 			changed = true
@@ -354,12 +462,12 @@ func Merge(a, b *State) *State {
 			scheds[s.ID] = s
 			continue
 		}
-		allow := intersect(cur.Allow, s.Allow)
+		allow, delays := intersect(cur.Allow, s.Allow), intersectDelays(cur.Delays, s.Delays)
 		// Prevalece o pedido de remoção mais tardio (ou nenhum).
 		if cur.RemoveAfter != nil && (s.RemoveAfter == nil || s.RemoveAfter.After(*cur.RemoveAfter)) {
 			cur = s
 		}
-		cur.Allow = allow
+		cur.Allow, cur.Delays = allow, delays
 		scheds[s.ID] = cur
 	}
 	for _, s := range scheds {

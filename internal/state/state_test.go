@@ -199,3 +199,65 @@ func TestMergeCannotAddExceptions(t *testing.T) {
 		t.Fatalf("exceção forjada prevaleceu: %+v %+v %+v", got.Locks[0].Allow, got.Schedules[0].Allow, got.Timers[0].Allow)
 	}
 }
+
+func TestScheduleDelay(t *testing.T) {
+	// Almoço: 14:00-16:00 todos os dias.
+	sc := Schedule{ID: "s", Sites: []string{"*"}, Days: []time.Weekday{0, 1, 2, 3, 4, 5, 6}, From: 14 * 60, To: 16 * 60, TZ: "America/Sao_Paulo"}
+	st := &State{Schedules: []Schedule{sc}}
+	before := at(5, 13, 30)
+
+	for _, bad := range []int{0, 61} {
+		if _, _, err := st.Delay("s", bad, before); err == nil {
+			t.Errorf("deveria recusar %d min", bad)
+		}
+	}
+	start, end, err := st.Delay("s", 60, before)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !start.Equal(at(5, 15, 0)) || !end.Equal(at(5, 17, 0)) {
+		t.Fatalf("janela = %v – %v", start, end)
+	}
+	s := st.Schedules[0]
+	for _, c := range []struct {
+		t    time.Time
+		want bool
+	}{{at(5, 14, 30), false}, {at(5, 15, 0), true}, {at(5, 16, 59), true}, {at(5, 17, 0), false},
+		{at(6, 14, 0), true}} { // amanhã volta ao normal
+		if got := s.WindowActive(c.t); got != c.want {
+			t.Errorf("%v: got %v want %v", c.t, got, c.want)
+		}
+	}
+	if _, _, err := st.Delay("s", 10, at(5, 13, 40)); err == nil {
+		t.Fatal("só uma vez por dia")
+	}
+	// Não dá para adiar a meio do bloqueio.
+	st = &State{Schedules: []Schedule{sc}}
+	if _, _, err := st.Delay("s", 30, at(5, 14, 10)); err == nil {
+		t.Fatal("não pode adiar a meio")
+	}
+	// Adiamento forjado num só ficheiro não vale.
+	forged := sc
+	forged.Delays = []ScheduleDelay{{Day: "2026-01-05", Minutes: 60}}
+	if got := Merge(&State{Schedules: []Schedule{forged}}, &State{Schedules: []Schedule{sc}}); len(got.Schedules[0].Delays) != 0 {
+		t.Fatal("adiamento forjado prevaleceu")
+	}
+	// Adiamentos antigos são descartados.
+	st = &State{Schedules: []Schedule{forged}}
+	if !st.Prune(at(9, 10, 0)) || len(st.Schedules[0].Delays) != 0 {
+		t.Fatal("adiamento antigo deveria sair")
+	}
+}
+
+func TestScheduleDelayOvernight(t *testing.T) {
+	// 22:00-06:00 adiado 30 min -> 22:30-06:30.
+	sc := Schedule{ID: "s", Days: []time.Weekday{time.Monday}, From: 22 * 60, To: 6 * 60, TZ: "America/Sao_Paulo"}
+	st := &State{Schedules: []Schedule{sc}}
+	if _, _, err := st.Delay("s", 30, at(5, 21, 0)); err != nil {
+		t.Fatal(err)
+	}
+	s := st.Schedules[0]
+	if s.WindowActive(at(5, 22, 10)) || !s.WindowActive(at(5, 22, 30)) || !s.WindowActive(at(6, 6, 15)) || s.WindowActive(at(6, 6, 30)) {
+		t.Fatal("janela noturna adiada errada")
+	}
+}

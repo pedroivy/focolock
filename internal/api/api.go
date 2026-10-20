@@ -25,6 +25,7 @@ const (
 	CmdLock           = "lock"
 	CmdScheduleAdd    = "schedule_add"
 	CmdScheduleRemove = "schedule_remove"
+	CmdScheduleDelay  = "schedule_delay"
 	CmdTimerAdd       = "timer_add"
 	CmdTimerUse       = "timer_use"
 	CmdTimerRemove    = "timer_remove"
@@ -54,6 +55,8 @@ type Request struct {
 	Periods []Period `json:"periods,omitempty"`
 	// timer_use: índice do período em Periods
 	Period int `json:"period,omitempty"`
+	// schedule_delay: minutos a adiar a janela de hoje
+	Minutes int `json:"minutes,omitempty"`
 }
 
 // Period é um período de um temporizador como chega da app/CLI.

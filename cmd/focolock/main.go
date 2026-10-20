@@ -31,6 +31,8 @@ Uso:
   focolock usar <id> <período>                      gasta os minutos de um período (1, 2, …)
   focolock status                                   mostra o que está bloqueado
   focolock abrir                                    abre a janela do app
+  focolock adiar <id> 60                            adia o bloqueio de hoje de um agendamento
+                                                    (antes de começar, até 60 min, 1 vez por dia)
   focolock remover <id>                             remove um agendamento ou temporizador (após 24h)
 
   sudo focolock instalar                            instala/atualiza o serviço
@@ -56,6 +58,8 @@ func main() {
 		err = cmdSchedule(args)
 	case "temporizador", "timer":
 		err = cmdTimer(args)
+	case "adiar", "delay":
+		err = cmdDelay(args)
 	case "usar", "use":
 		err = cmdTimerUse(args)
 	case "status", "st":
@@ -252,6 +256,22 @@ func cmdTimer(args []string) error {
 	resp, err := api.Call(api.Request{
 		Cmd: api.CmdTimerAdd, Sites: fs.Args(), Allow: splitList(*exceto), Name: *nome, Periods: periods, TZ: localTZ(),
 	}, 10*time.Second)
+	if err != nil {
+		return err
+	}
+	fmt.Println(resp.Message)
+	return nil
+}
+
+func cmdDelay(args []string) error {
+	if len(args) != 2 {
+		return fmt.Errorf("uso: focolock adiar <id do agendamento> <minutos, até %d>", state.MaxDelay)
+	}
+	n, err := strconv.Atoi(strings.TrimSuffix(args[1], "m"))
+	if err != nil {
+		return fmt.Errorf("minutos inválidos %q", args[1])
+	}
+	resp, err := api.Call(api.Request{Cmd: api.CmdScheduleDelay, ID: args[0], Minutes: n, TZ: localTZ()}, 10*time.Second)
 	if err != nil {
 		return err
 	}

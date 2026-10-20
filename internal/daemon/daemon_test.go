@@ -185,3 +185,25 @@ func TestInternetLockWithExceptions(t *testing.T) {
 		t.Fatal("deveria falhar")
 	}
 }
+
+func TestScheduleDelayAPI(t *testing.T) {
+	d, _ := newTestDaemon(t)
+	now := d.clock.Now().In(time.UTC)
+	// Janela daqui a 2h (no mesmo dia, se der; senão o teste não se aplica).
+	if now.Hour() >= 21 {
+		t.Skip("perto da meia-noite UTC")
+	}
+	from := now.Add(2 * time.Hour).Format("15:04")
+	to := now.Add(3 * time.Hour).Format("15:04")
+	resp := d.Handle(api.Request{Cmd: api.CmdScheduleAdd, Sites: []string{"x.com"}, Days: []time.Weekday{0, 1, 2, 3, 4, 5, 6}, From: from, To: to, TZ: "UTC"})
+	if !resp.OK {
+		t.Fatal(resp.Error)
+	}
+	id := resp.State.Schedules[0].ID
+	if resp = d.Handle(api.Request{Cmd: api.CmdScheduleDelay, ID: id, Minutes: 60, TZ: "UTC"}); !resp.OK || len(resp.State.Schedules[0].Delays) != 1 {
+		t.Fatalf("resp = %+v", resp)
+	}
+	if resp = d.Handle(api.Request{Cmd: api.CmdScheduleDelay, ID: id, Minutes: 10}); resp.OK {
+		t.Fatal("segundo adiamento no mesmo dia deveria falhar")
+	}
+}

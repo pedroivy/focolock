@@ -260,6 +260,15 @@ func (d *Daemon) apply(req api.Request, now time.Time) (string, error) {
 		log.Printf("novo agendamento %s %q", sc.ID, sc.Name)
 		return fmt.Sprintf("Agendamento %s criado.", sc.ID), nil
 
+	case api.CmdScheduleDelay:
+		start, end, err := d.st.Delay(req.ID, req.Minutes, now)
+		if err != nil {
+			return "", err
+		}
+		log.Printf("agendamento %s adiado %d min hoje", req.ID, req.Minutes)
+		l := loc(req.TZ)
+		return fmt.Sprintf("Adiado: hoje bloqueia das %s às %s.", start.In(l).Format("15:04"), end.In(l).Format("15:04")), nil
+
 	case api.CmdTimerAdd:
 		list, err := sites.NormalizeAll(req.Sites)
 		if err != nil {
