@@ -288,9 +288,18 @@ func (st *State) ActiveAllow(now time.Time) []string {
 	if allow == nil {
 		return nil // sem bloqueio da internet não há exceções
 	}
+	paused := false
 	for s := range st.pausedSites(now) {
 		if s != sites.Internet {
 			allow[s] = true
+			paused = true
+		}
+	}
+	// Enviar ficheiros costuma ir para um armazenamento externo (S3, R2…):
+	// durante a pausa, abri-los também, senão o site abre mas o envio falha.
+	if paused {
+		for _, h := range sites.UploadHosts {
+			allow[h] = true
 		}
 	}
 	for s := range blocked {

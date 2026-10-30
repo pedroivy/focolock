@@ -69,6 +69,9 @@ func (e *Enforcer) discovered(allow, blocked []string) []string {
 	}
 	var out []string
 	for _, site := range allow {
+		if sites.IsUploadHost(site) {
+			continue // armazenamento, não há página para ver
+		}
 		out = append(out, e.found[site]...)
 		if at, ok := e.seenAt[site]; ok && time.Since(at) < DiscoverEvery {
 			continue
@@ -85,8 +88,10 @@ func (e *Enforcer) discovered(allow, blocked []string) []string {
 			e.dynMu.Lock()
 			defer e.dynMu.Unlock()
 			if err != nil {
-				log.Printf("descoberta %s: %v (nova tentativa em 10 min)", site, err)
-				e.seenAt[site] = time.Now().Add(10*time.Minute - DiscoverEvery)
+				log.Printf("descoberta %s: %v (nova tentativa em 1 h)", site, err)
+				// Sites que recusam visitas automáticas (403) recusam sempre:
+				// tentar de novo daqui a uma hora chega.
+				e.seenAt[site] = time.Now().Add(time.Hour - DiscoverEvery)
 				return
 			}
 			log.Printf("descoberta %s: %v", site, hosts)

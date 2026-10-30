@@ -143,6 +143,27 @@ var Companions = map[string][]string{
 	"duolingo.com": {"d35aaqx5ub95lt.cloudfront.net"},
 }
 
+// UploadHosts: serviços de armazenamento para onde os sites costumam mandar
+// os ficheiros enviados (vídeos, imagens). O endereço exato só aparece no
+// momento do envio, por isso, durante a pausa de um temporizador com a
+// internet bloqueada, abrem-se estes serviços inteiros. Não são sites que se
+// possam "navegar".
+var UploadHosts = []string{
+	"amazonaws.com", "cloudfront.net", "r2.cloudflarestorage.com", "storage.googleapis.com",
+	"b-cdn.net", "bunnycdn.com", "backblazeb2.com", "digitaloceanspaces.com",
+	"wasabisys.com", "blob.core.windows.net", "akamaized.net",
+}
+
+// IsUploadHost diz se d é um dos UploadHosts.
+func IsUploadHost(d string) bool {
+	for _, h := range UploadHosts {
+		if d == h {
+			return true
+		}
+	}
+	return false
+}
+
 // AllowDomains devolve os domínios (cada um com todos os subdomínios) que
 // uma lista de exceções abre: os próprios, o domínio principal de cada um
 // (permitir "app.exemplo.com" abre "exemplo.com", onde costumam estar a API

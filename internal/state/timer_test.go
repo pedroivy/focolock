@@ -1,7 +1,9 @@
 package state
 
 import (
+	"github.com/pedroivy/focolock/internal/sites"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 )
@@ -182,7 +184,7 @@ func TestTimerPauseOpensInternetBlock(t *testing.T) {
 		t.Fatal(err)
 	}
 	during := now.Add(5 * time.Minute)
-	if got := st.ActiveAllow(during); !reflect.DeepEqual(got, []string{"github.com", "x.com"}) {
+	if got := withoutUpload(st.ActiveAllow(during)); !reflect.DeepEqual(got, []string{"github.com", "x.com"}) {
 		t.Fatalf("durante a pausa: allow = %v", got)
 	}
 	if got := st.ActiveSites(during); !reflect.DeepEqual(got, []string{"*"}) {
@@ -194,7 +196,7 @@ func TestTimerPauseOpensInternetBlock(t *testing.T) {
 
 	// Um site bloqueado um a um por outra regra continua bloqueado.
 	st.Locks = []Lock{{ID: "l", Sites: []string{"x.com"}, Start: now, End: now.Add(time.Hour)}}
-	if got := st.ActiveAllow(during); !reflect.DeepEqual(got, []string{"github.com"}) {
+	if got := withoutUpload(st.ActiveAllow(during)); !reflect.DeepEqual(got, []string{"github.com"}) {
 		t.Fatalf("com bloqueio explícito: allow = %v", got)
 	}
 
@@ -223,4 +225,37 @@ func TestInternetTimerPauseLiftsInternetBlock(t *testing.T) {
 	if got := st.ActiveSites(now.Add(10 * time.Minute)); !reflect.DeepEqual(got, []string{"*", "y.com"}) {
 		t.Fatalf("depois da pausa: active = %v", got)
 	}
+}
+
+func TestTimerPauseOpensUploadStorage(t *testing.T) {
+	sc := workday()
+	sc.Sites = []string{"*"}
+	st := &State{Schedules: []Schedule{sc}, Timers: []Timer{twoPeriods()}}
+	now := at(5, 10, 0)
+	if got := st.ActiveAllow(now); len(got) != 0 {
+		t.Fatalf("antes da pausa: %v", got)
+	}
+	if _, err := st.UseTimer("t", 0, now); err != nil {
+		t.Fatal(err)
+	}
+	got := st.ActiveAllow(now.Add(time.Minute))
+	for _, want := range []string{"x.com", "amazonaws.com", "r2.cloudflarestorage.com"} {
+		if !slices.Contains(got, want) {
+			t.Errorf("faltou %q em %v", want, got)
+		}
+	}
+	if got := st.ActiveAllow(now.Add(10 * time.Minute)); len(got) != 0 {
+		t.Fatalf("depois da pausa: %v", got)
+	}
+}
+
+// withoutUpload tira os UploadHosts (abertos em qualquer pausa).
+func withoutUpload(list []string) []string {
+	var out []string
+	for _, s := range list {
+		if !sites.IsUploadHost(s) {
+			out = append(out, s)
+		}
+	}
+	return out
 }
