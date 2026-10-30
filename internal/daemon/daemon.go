@@ -290,6 +290,14 @@ func (d *Daemon) apply(req api.Request, now time.Time) (string, error) {
 		log.Printf("novo temporizador %s %q", t.ID, t.Name)
 		return fmt.Sprintf("Temporizador %s criado. Os sites ficam bloqueados fora das pausas.", t.ID), nil
 
+	case api.CmdTimerEmergency:
+		u, err := d.st.UseEmergency(req.ID, now)
+		if err != nil {
+			return "", err
+		}
+		log.Printf("temporizador %s: pausa de emergência até %s", req.ID, u.End.Format(time.RFC3339))
+		return fmt.Sprintf("Pausa de emergência: desbloqueado até %s. Não há outra.", u.End.In(loc(req.TZ)).Format("15:04")), nil
+
 	case api.CmdTimerUse:
 		u, err := d.st.UseTimer(req.ID, req.Period, now)
 		if err != nil {

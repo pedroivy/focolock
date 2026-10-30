@@ -44,6 +44,12 @@ struct StateDTO: Decodable {
     let locks: [LockDTO]?
     let schedules: [SchedDTO]?
     let timers: [TimerDTO]?
+    let emergencyUsed: String?
+
+    enum CodingKeys: String, CodingKey {
+        case locks, schedules, timers
+        case emergencyUsed = "emergency_used"
+    }
 }
 
 struct LockDTO: Decodable, Identifiable {
@@ -255,6 +261,15 @@ final class Model: ObservableObject {
     func useTimer(_ id: String, period: Int) async {
         do {
             let r = try await call(["cmd": "timer_use", "id": id, "period": period])
+            toast = r.message
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func useEmergency(_ id: String) async {
+        do {
+            let r = try await call(["cmd": "timer_emergency", "id": id])
             toast = r.message
         } catch {
             errorMessage = error.localizedDescription
@@ -1045,6 +1060,7 @@ struct TimersCard: View {
     @State private var showNew = false
     @State private var removing: TimerDTO?
     @State private var using: (TimerDTO, Int)?
+    @State private var emergency: TimerDTO?
 
     var body: some View {
         Card(title: "Temporizador") {
@@ -1073,6 +1089,21 @@ struct TimersCard: View {
                             ForEach(Array(t.periods.enumerated()), id: \.offset) { i, p in
                                 periodRow(t, i, p, now: now)
                             }
+                            if let u = (t.uses ?? []).first(where: { $0.period == -1 && $0.startDate <= now && now < $0.endDate }) {
+                                HStack {
+                                    Circle().fill(Color.orange).frame(width: 9, height: 9)
+                                    Text("Pausa de emergência")
+                                    Spacer()
+                                    Text("Livre · " + formatLeft(u.endDate.timeIntervalSince(now)))
+                                        .font(.body.monospacedDigit().weight(.bold))
+                                        .foregroundStyle(.orange)
+                                }
+                                .font(.callout)
+                            } else if model.resp?.state?.emergencyUsed == nil && t.removeAfter == nil {
+                                Button("Pausa de emergência (única, \(t.periods.first?.minutes ?? 10) min)") { emergency = t }
+                                    .buttonStyle(.link)
+                                    .foregroundStyle(.orange)
+                            }
                         }
                         .padding(12)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1089,6 +1120,14 @@ struct TimersCard: View {
         }
         .sheet(isPresented: $showNew) {
             NewTimerView().environmentObject(model)
+        }
+        .alert("Usar a pausa de emergência?",
+               isPresented: Binding(get: { emergency != nil }, set: { if !$0 { emergency = nil } }),
+               presenting: emergency) { t in
+            Button("Voltar", role: .cancel) {}
+            Button("Usar agora", role: .destructive) { Task { await model.useEmergency(t.id) } }
+        } message: { t in
+            Text("\(sitesLabel(t.sites)) fica desbloqueado durante \(t.periods.first?.minutes ?? 10) minutos, mesmo fora do horário e com a internet bloqueada.\nSó existe UMA pausa de emergência, para sempre. Depois o botão desaparece.")
         }
         .alert("Remover este temporizador?",
                isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }),

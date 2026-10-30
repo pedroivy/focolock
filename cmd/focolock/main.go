@@ -60,6 +60,8 @@ func main() {
 		err = cmdTimer(args)
 	case "adiar", "delay":
 		err = cmdDelay(args)
+	case "emergencia", "emergência", "emergency":
+		err = cmdEmergency(args)
 	case "usar", "use":
 		err = cmdTimerUse(args)
 	case "status", "st":
@@ -272,6 +274,21 @@ func cmdDelay(args []string) error {
 		return fmt.Errorf("minutos inválidos %q", args[1])
 	}
 	resp, err := api.Call(api.Request{Cmd: api.CmdScheduleDelay, ID: args[0], Minutes: n, TZ: localTZ()}, 10*time.Second)
+	if err != nil {
+		return err
+	}
+	fmt.Println(resp.Message)
+	return nil
+}
+
+func cmdEmergency(args []string) error {
+	if len(args) != 1 {
+		return fmt.Errorf("uso: focolock emergencia <id do temporizador>  (só funciona uma vez, para sempre)")
+	}
+	if !confirm("Usar a pausa de emergência? Só existe uma, para sempre.", false) {
+		return fmt.Errorf("cancelado")
+	}
+	resp, err := api.Call(api.Request{Cmd: api.CmdTimerEmergency, ID: args[0], TZ: localTZ()}, 10*time.Second)
 	if err != nil {
 		return err
 	}

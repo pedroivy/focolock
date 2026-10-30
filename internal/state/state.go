@@ -48,8 +48,11 @@ type State struct {
 	Schedules []Schedule `json:"schedules"`
 	Timers    []Timer    `json:"timers,omitempty"`
 	// Relógio confiável (ver pacote clock).
-	ClockOffset time.Duration `json:"clock_offset"`
-	LastTrusted time.Time     `json:"last_trusted"`
+	// EmergencyUsed: quando foi gasta a pausa de emergência (só há uma, para
+	// sempre; ver UseEmergency).
+	EmergencyUsed *time.Time    `json:"emergency_used,omitempty"`
+	ClockOffset   time.Duration `json:"clock_offset"`
+	LastTrusted   time.Time     `json:"last_trusted"`
 }
 
 // Clone copia o estado para ser enviado sem segurar o mutex do daemon.
@@ -485,6 +488,11 @@ func Merge(a, b *State) *State {
 	sort.Slice(out.Schedules, func(i, j int) bool { return out.Schedules[i].Created.Before(out.Schedules[j].Created) })
 
 	out.Timers = mergeTimers(a.Timers, b.Timers)
+	// Gasta num dos ficheiros = gasta: apagar um não a devolve.
+	out.EmergencyUsed = a.EmergencyUsed
+	if b.EmergencyUsed != nil && (out.EmergencyUsed == nil || b.EmergencyUsed.Before(*out.EmergencyUsed)) {
+		out.EmergencyUsed = b.EmergencyUsed
+	}
 
 	out.ClockOffset, out.LastTrusted = a.ClockOffset, a.LastTrusted
 	if b.LastTrusted.After(a.LastTrusted) {

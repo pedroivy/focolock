@@ -128,6 +128,34 @@ func (t Timer) PeriodStatus(i int, now time.Time) (string, time.Time) {
 	return PeriodOutside, time.Time{}
 }
 
+// EmergencyPeriod marca, em Uses, a pausa de emergência (não é de nenhum período).
+const EmergencyPeriod = -1
+
+// UseEmergency gasta a pausa de emergência num temporizador: abre os sites
+// dele durante os minutos do seu primeiro período, a qualquer hora. Só existe
+// uma, para sempre, em todo o estado.
+func (st *State) UseEmergency(id string, now time.Time) (TimerUse, error) {
+	if st.EmergencyUsed != nil {
+		return TimerUse{}, fmt.Errorf("a pausa de emergência já foi usada (%s)", st.EmergencyUsed.Format("02/01/2006 15:04"))
+	}
+	for i := range st.Timers {
+		t := &st.Timers[i]
+		if t.ID != id {
+			continue
+		}
+		if t.Removed(now) || len(t.Periods) == 0 {
+			return TimerUse{}, fmt.Errorf("temporizador %q não está ativo", id)
+		}
+		day, _ := t.dayAndMinute(now)
+		u := TimerUse{Period: EmergencyPeriod, Day: day, Start: now, End: now.Add(time.Duration(t.Periods[0].Minutes) * time.Minute)}
+		t.Uses = append(t.Uses, u)
+		used := now
+		st.EmergencyUsed = &used
+		return u, nil
+	}
+	return TimerUse{}, fmt.Errorf("temporizador %q não encontrado", id)
+}
+
 // UseTimer gasta a pausa do período idx do temporizador id. Só funciona dentro
 // do horário do período e uma vez por dia; não há como pausar nem repetir.
 func (st *State) UseTimer(id string, idx int, now time.Time) (TimerUse, error) {

@@ -29,6 +29,7 @@ const (
 	CmdTimerAdd       = "timer_add"
 	CmdTimerUse       = "timer_use"
 	CmdTimerRemove    = "timer_remove"
+	CmdTimerEmergency = "timer_emergency"
 )
 
 type Request struct {

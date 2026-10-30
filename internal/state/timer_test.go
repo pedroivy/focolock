@@ -259,3 +259,36 @@ func withoutUpload(list []string) []string {
 	}
 	return out
 }
+
+func TestEmergencyOnlyOnce(t *testing.T) {
+	sc := workday()
+	sc.Sites = []string{"*"}
+	st := &State{Schedules: []Schedule{sc}, Timers: []Timer{twoPeriods()}}
+	now := at(5, 13, 0) // fora de qualquer período do temporizador
+	if _, err := st.UseTimer("t", 0, now); err == nil {
+		t.Fatal("fora do horário a pausa normal não pode")
+	}
+	u, err := st.UseEmergency("t", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !u.End.Equal(now.Add(10 * time.Minute)) {
+		t.Fatalf("use = %+v", u)
+	}
+	if got := withoutUpload(st.ActiveAllow(now.Add(time.Minute))); !slices.Contains(got, "x.com") {
+		t.Fatalf("emergência não abriu o site: %v", got)
+	}
+	// Não mexe nos períodos normais.
+	if s, _ := st.Timers[0].PeriodStatus(1, at(5, 18, 30)); s != PeriodAvailable {
+		t.Fatalf("período da noite = %s", s)
+	}
+	if _, err := st.UseEmergency("t", now.Add(time.Hour)); err == nil {
+		t.Fatal("segunda emergência deveria falhar")
+	}
+	// Apagar a marca num dos ficheiros não a devolve.
+	clean := st.Clone()
+	clean.EmergencyUsed = nil
+	if Merge(clean, st).EmergencyUsed == nil {
+		t.Fatal("emergência voltou a ficar disponível")
+	}
+}
